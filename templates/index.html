@@ -58,6 +58,30 @@
             <button class="switch" data-scene="on" type="button">Ligar tudo</button>
           </div>
           <p class="note">As ações rápidas aplicam a todos os dispositivos visíveis no painel.</p>
+
+          <hr class="divider">
+          <h2>Editar dispositivo</h2>
+          <form id="device-form" class="device-form">
+            <p class="note" id="device-form-empty">Toque num dispositivo para editar.</p>
+            <input type="hidden" id="form-device-id">
+            <label>
+              Nome
+              <input id="form-display-name" type="text" maxlength="64">
+            </label>
+            <label>
+              Divisão
+              <input id="form-room" type="text" maxlength="64" placeholder="Sala, Cozinha...">
+            </label>
+            <label>
+              Aliases (separados por vírgula)
+              <input id="form-other-names" type="text" maxlength="200">
+            </label>
+            <label>
+              Imagem (URL ou /static/...)
+              <input id="form-image" type="text" maxlength="300">
+            </label>
+            <button class="switch" id="save-device" type="submit">Guardar alterações</button>
+          </form>
         </section>
       </main>
     </div>

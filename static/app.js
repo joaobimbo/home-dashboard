@@ -3,15 +3,34 @@ const refreshButton = document.getElementById("refresh-all");
 const clockWidget = document.getElementById("clock-widget");
 const roomFilter = document.getElementById("room-filter");
 const statusOverview = document.getElementById("status-overview");
+const deviceForm = document.getElementById("device-form");
+const formEmpty = document.getElementById("device-form-empty");
 
 let configuredDevices = [];
 let activeRoom = "all";
+let selectedDeviceId = "";
 
 async function fetchConfiguredDevices() {
   const res = await fetch("/api/shelly/configured");
   if (!res.ok) {
     throw new Error("Failed to fetch devices");
   }
+  return res.json();
+}
+
+async function updateDeviceConfig(deviceId, payload) {
+  const res = await fetch(`/api/shelly/${deviceId}/config`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    throw new Error("Failed to update device config");
+  }
+
   return res.json();
 }
 
@@ -96,6 +115,27 @@ function repaintOverview() {
   statusOverview.querySelector("[data-total]").textContent = String(totals.total);
   statusOverview.querySelector("[data-on]").textContent = String(totals.on);
   statusOverview.querySelector("[data-offline]").textContent = String(totals.offline);
+}
+
+function pickDevice(deviceId) {
+  selectedDeviceId = deviceId;
+  document.querySelectorAll(".device-card").forEach((card) => {
+    card.classList.toggle("is-selected", card.dataset.deviceId === deviceId);
+  });
+
+  const device = configuredDevices.find((item) => item.id === deviceId);
+  if (!device || !deviceForm) {
+    return;
+  }
+
+  if (formEmpty) {
+    formEmpty.hidden = true;
+  }
+  document.getElementById("form-device-id").value = device.id;
+  document.getElementById("form-display-name").value = device.display_name || device.name;
+  document.getElementById("form-room").value = device.room || "Casa";
+  document.getElementById("form-other-names").value = (device.other_names || []).join(", ");
+  document.getElementById("form-image").value = device.image || "";
 }
 
 function paintCard(card, info) {
@@ -212,6 +252,8 @@ if (deviceList) {
       return;
     }
 
+    pickDevice(card.dataset.deviceId);
+
     const deviceId = card.dataset.deviceId;
     const action = card.dataset.action || "toggle";
     card.disabled = true;
@@ -244,6 +286,37 @@ if (roomFilter) {
     renderRoomFilter(configuredDevices);
     applyRoomFilter();
     repaintOverview();
+  });
+}
+
+if (deviceForm) {
+  deviceForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const deviceId = document.getElementById("form-device-id").value;
+    if (!deviceId) {
+      return;
+    }
+
+    const payload = {
+      display_name: document.getElementById("form-display-name").value,
+      room: document.getElementById("form-room").value,
+      other_names: document.getElementById("form-other-names").value,
+      image: document.getElementById("form-image").value,
+    };
+
+    const saveButton = document.getElementById("save-device");
+    saveButton.disabled = true;
+    try {
+      await updateDeviceConfig(deviceId, payload);
+      configuredDevices = await fetchConfiguredDevices();
+      renderRoomFilter(configuredDevices);
+      renderDevices(configuredDevices);
+      applyRoomFilter();
+      await refreshAll();
+      pickDevice(deviceId);
+    } finally {
+      saveButton.disabled = false;
+    }
   });
 }
 

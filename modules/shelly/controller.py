@@ -22,10 +22,16 @@ class ShellyDevice:
 
 
 class ShellyController:
-    def __init__(self, devices: List[ShellyDevice], timeout_seconds: int = 2):
+    def __init__(
+        self,
+        devices: List[ShellyDevice],
+        timeout_seconds: int = 2,
+        config_path: str | None = None,
+    ):
         self.devices = devices
         self._timeout_seconds = timeout_seconds
         self._device_map: Dict[str, ShellyDevice] = {d.id: d for d in devices}
+        self._config_path = config_path
 
     @classmethod
     def from_sources(cls, config_path: str | None = None):
@@ -33,7 +39,7 @@ class ShellyController:
             config_path = str(Path(__file__).resolve().parent / "devices.json")
         file_devices = cls._load_from_file(config_path)
         if file_devices:
-            return cls(file_devices)
+            return cls(file_devices, config_path=config_path)
 
         env_devices = cls._load_from_environment()
         if env_devices:
@@ -114,6 +120,80 @@ class ShellyController:
             }
             for device in self.devices
         ]
+
+    def update_device_config(self, device_id: str, updates: Dict[str, object]):
+        device = self._device_map.get(device_id)
+        if device is None:
+            return {"ok": False, "error": "Unknown device"}
+
+        display_name = str(updates.get("display_name", device.display_name)).strip()
+        room = str(updates.get("room", device.room)).strip() or "Casa"
+        image = str(updates.get("image", device.image)).strip()
+        other_names_raw = updates.get("other_names", device.other_names)
+        if isinstance(other_names_raw, str):
+            other_names = [
+                item.strip() for item in other_names_raw.split(",") if item.strip()
+            ]
+        elif isinstance(other_names_raw, list):
+            other_names = [
+                str(item).strip() for item in other_names_raw if str(item).strip()
+            ]
+        else:
+            other_names = list(device.other_names)
+
+        updated_device = ShellyDevice(
+            id=device.id,
+            display_name=display_name or device.id,
+            host=device.host,
+            relay=device.relay,
+            image=image,
+            room=room,
+            other_names=other_names,
+        )
+
+        self.devices = [
+            updated_device if current.id == device_id else current
+            for current in self.devices
+        ]
+        self._device_map[device_id] = updated_device
+        self._write_config_file()
+
+        return {"ok": True, "device": self._device_to_dict(updated_device)}
+
+    def _device_to_dict(self, device: ShellyDevice):
+        return {
+            "id": device.id,
+            "display_name": device.display_name,
+            "host": device.host,
+            "relay": device.relay,
+            "image": device.image,
+            "room": device.room,
+            "other_names": device.other_names,
+        }
+
+    def _write_config_file(self):
+        if not self._config_path:
+            return
+
+        path = Path(self._config_path)
+        payload = []
+        for device in self.devices:
+            payload.append(
+                {
+                    "id": device.id,
+                    "device_name": device.display_name,
+                    "display_name": device.display_name,
+                    "other_names": device.other_names,
+                    "room": device.room,
+                    "host": device.host,
+                    "relay": device.relay,
+                    "image": device.image,
+                }
+            )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8"
+        )
 
     def read_device(self, device_id: str):
         device = self._device_map.get(device_id)
