@@ -1,0 +1,20 @@
+[
+  {
+    "id": "living-room",
+    "device_name": "Living Room",
+    "display_name": "Living Room",
+    "other_names": ["Sala"],
+    "host": "192.168.1.50",
+    "relay": 0,
+    "image": ""
+  },
+  {
+    "id": "kitchen",
+    "device_name": "Kitchen",
+    "display_name": "Kitchen",
+    "other_names": ["Cozinha"],
+    "host": "192.168.1.51",
+    "relay": 0,
+    "image": ""
+  }
+]
