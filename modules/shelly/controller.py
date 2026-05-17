@@ -13,6 +13,7 @@ class ShellyDevice:
     display_name: str
     host: str
     device_name: str = ""
+    component: str = "relay"
     relay: int = 0
     image: str = ""
     room: str = "Casa"
@@ -75,6 +76,7 @@ class ShellyController:
                         or item.get("name")
                         or item["id"]
                     ),
+                    component=str(item.get("component", "relay")),
                     relay=int(item.get("relay", 0)),
                     image=str(item.get("image", "")),
                     room=str(item.get("room", "Casa")),
@@ -105,6 +107,7 @@ class ShellyController:
                             or item.get("name")
                             or item["id"]
                         ),
+                        component=str(item.get("component", "relay")),
                         relay=int(item.get("relay", 0)),
                         image=str(item.get("image", "")),
                         room=str(item.get("room", "Casa")),
@@ -144,6 +147,7 @@ class ShellyController:
                 "name": device.name,
                 "display_name": device.display_name,
                 "host": device.host,
+                "component": device.component,
                 "relay": device.relay,
                 "image": device.image,
                 "room": device.room,
@@ -177,6 +181,7 @@ class ShellyController:
             display_name=display_name or device.id,
             host=device.host,
             device_name=device.device_name,
+            component=device.component,
             relay=device.relay,
             image=image,
             room=room,
@@ -198,6 +203,7 @@ class ShellyController:
             "device_name": device.device_name,
             "display_name": device.display_name,
             "host": device.host,
+            "component": device.component,
             "relay": device.relay,
             "image": device.image,
             "room": device.room,
@@ -219,6 +225,7 @@ class ShellyController:
                     "other_names": device.other_names,
                     "room": device.room,
                     "host": device.host,
+                    "component": device.component,
                     "relay": device.relay,
                     "image": device.image,
                 }
@@ -234,15 +241,25 @@ class ShellyController:
             return {"ok": False, "id": device_id, "error": "Unknown device"}
 
         try:
-            relay_status = self._request_json(device, "/relay/0")
-            is_on = bool(relay_status.get("ison", False))
-            return {
+            relay_status = self._read_status(device)
+            state = self._extract_state(device, relay_status)
+            result = {
                 "ok": True,
                 "id": device.id,
                 "name": device.name,
-                "state": "on" if is_on else "off",
+                "component": device.component,
+                "state": state,
                 "reachable": True,
             }
+            if (device.component or "relay").lower() == "cover":
+                pos = relay_status.get("current_pos")
+                if isinstance(pos, (int, float)):
+                    result["position"] = int(max(0, min(100, round(pos))))
+            if (device.component or "relay").lower() == "light":
+                brightness = relay_status.get("brightness")
+                if isinstance(brightness, (int, float)):
+                    result["brightness"] = int(max(0, min(100, round(brightness))))
+            return result
         except Exception as exc:
             return {
                 "ok": False,
@@ -268,9 +285,132 @@ class ShellyController:
 
         try:
             state_value = "on" if target_action == "on" else "off"
-            self._request_json(device, f"/relay/{device.relay}?turn={state_value}")
+            self._apply_output_action(device, state_value)
             updated = self.read_device(device_id)
             if updated.get("ok"):
+                return {"ok": True, **updated}
+            return updated
+        except Exception as exc:
+            return {
+                "ok": False,
+                "id": device.id,
+                "name": device.name,
+                "error": str(exc),
+            }
+
+    def set_cover_position(self, device_id: str, position: int):
+        device = self._device_map.get(device_id)
+        if device is None:
+            return {"ok": False, "error": "Unknown device"}
+
+        if (device.component or "relay").lower() != "cover":
+            return {"ok": False, "error": "Device is not a cover"}
+
+        target = max(0, min(100, int(position)))
+        try:
+            self._request_json(
+                device, f"/rpc/Cover.GoToPosition?id={int(device.relay)}&pos={target}"
+            )
+            updated = self.read_device(device_id)
+            if updated.get("ok"):
+                updated["position"] = target
+                return {"ok": True, **updated}
+            return updated
+        except Exception as exc:
+            return {
+                "ok": False,
+                "id": device.id,
+                "name": device.name,
+                "error": str(exc),
+            }
+
+    def apply_cover_command(self, device_id: str, command: str):
+        device = self._device_map.get(device_id)
+        if device is None:
+            return {"ok": False, "error": "Unknown device"}
+
+        if (device.component or "relay").lower() != "cover":
+            return {"ok": False, "error": "Device is not a cover"}
+
+        if command not in {"open", "close", "stop"}:
+            return {"ok": False, "error": "Invalid cover command"}
+
+        channel = int(device.relay)
+        try:
+            try:
+                if command == "open":
+                    self._request_json(device, f"/rpc/Cover.Open?id={channel}")
+                elif command == "close":
+                    self._request_json(device, f"/rpc/Cover.Close?id={channel}")
+                else:
+                    self._request_json(device, f"/rpc/Cover.Stop?id={channel}")
+            except Exception:
+                self._request_json(device, f"/roller/{channel}?go={command}")
+
+            updated = self.read_device(device_id)
+            if updated.get("ok"):
+                return {"ok": True, **updated}
+            return updated
+        except Exception as exc:
+            return {
+                "ok": False,
+                "id": device.id,
+                "name": device.name,
+                "error": str(exc),
+            }
+
+    def apply_light_command(self, device_id: str, command: str):
+        device = self._device_map.get(device_id)
+        if device is None:
+            return {"ok": False, "error": "Unknown device"}
+
+        if (device.component or "relay").lower() != "light":
+            return {"ok": False, "error": "Device is not a light dimmer"}
+
+        if command not in {"on", "off", "up", "down"}:
+            return {"ok": False, "error": "Invalid light command"}
+
+        channel = int(device.relay)
+        try:
+            if command == "on":
+                self._set_light_state(device, channel, True)
+            elif command == "off":
+                self._set_light_state(device, channel, False)
+            else:
+                status = self._read_status(device)
+                current = status.get("brightness")
+                if not isinstance(current, (int, float)):
+                    current = 0
+                step = 5 if command == "up" else -5
+                target = int(max(0, min(100, round(current + step))))
+                self._set_light_brightness(device, channel, target)
+
+            updated = self.read_device(device_id)
+            if updated.get("ok"):
+                return {"ok": True, **updated}
+            return updated
+        except Exception as exc:
+            return {
+                "ok": False,
+                "id": device.id,
+                "name": device.name,
+                "error": str(exc),
+            }
+
+    def set_light_brightness(self, device_id: str, brightness: int):
+        device = self._device_map.get(device_id)
+        if device is None:
+            return {"ok": False, "error": "Unknown device"}
+
+        if (device.component or "relay").lower() != "light":
+            return {"ok": False, "error": "Device is not a light dimmer"}
+
+        level = int(max(0, min(100, brightness)))
+        try:
+            self._set_light_brightness(device, int(device.relay), level)
+            updated = self.read_device(device_id)
+            if updated.get("ok"):
+                updated["brightness"] = level
                 return {"ok": True, **updated}
             return updated
         except Exception as exc:
@@ -301,6 +441,91 @@ class ShellyController:
             "failed": len(results) - success,
             "results": results,
         }
+
+    def _read_status(self, device: ShellyDevice):
+        component = (device.component or "relay").lower()
+        channel = int(device.relay)
+
+        if component == "switch":
+            return self._request_json(device, f"/rpc/Switch.GetStatus?id={channel}")
+
+        if component == "light":
+            try:
+                return self._request_json(device, f"/rpc/Light.GetStatus?id={channel}")
+            except Exception:
+                return self._request_json(device, f"/light/{channel}")
+
+        if component == "cover":
+            return self._request_json(device, f"/rpc/Cover.GetStatus?id={channel}")
+
+        try:
+            return self._request_json(device, f"/relay/{channel}")
+        except Exception:
+            return self._request_json(device, f"/rpc/Switch.GetStatus?id={channel}")
+
+    def _extract_state(self, device: ShellyDevice, payload: Dict[str, object]):
+        component = (device.component or "relay").lower()
+
+        if component == "cover":
+            state = str(payload.get("state", "")).lower()
+            if state in {"opening", "closing", "stopped", "open", "closed"}:
+                return state
+            position = payload.get("current_pos")
+            if isinstance(position, (int, float)):
+                if position <= 0:
+                    return "closed"
+                if position >= 100:
+                    return "open"
+                return "partially-open"
+            return "unknown"
+
+        is_on = bool(payload.get("ison", payload.get("output", False)))
+        return "on" if is_on else "off"
+
+    def _apply_output_action(self, device: ShellyDevice, state_value: str):
+        component = (device.component or "relay").lower()
+        channel = int(device.relay)
+
+        if component == "switch":
+            on_value = "true" if state_value == "on" else "false"
+            self._request_json(device, f"/rpc/Switch.Set?id={channel}&on={on_value}")
+            return
+
+        if component == "light":
+            try:
+                on_value = "true" if state_value == "on" else "false"
+                self._request_json(device, f"/rpc/Light.Set?id={channel}&on={on_value}")
+            except Exception:
+                self._request_json(device, f"/light/{channel}?turn={state_value}")
+            return
+
+        if component == "cover":
+            pos = 100 if state_value == "on" else 0
+            self._request_json(
+                device, f"/rpc/Cover.GoToPosition?id={channel}&pos={pos}"
+            )
+            return
+
+        self._request_json(device, f"/relay/{channel}?turn={state_value}")
+
+    def _set_light_state(self, device: ShellyDevice, channel: int, on_value: bool):
+        try:
+            on_text = "true" if on_value else "false"
+            self._request_json(device, f"/rpc/Light.Set?id={channel}&on={on_text}")
+        except Exception:
+            turn = "on" if on_value else "off"
+            self._request_json(device, f"/light/{channel}?turn={turn}")
+
+    def _set_light_brightness(
+        self, device: ShellyDevice, channel: int, brightness: int
+    ):
+        level = int(max(0, min(100, brightness)))
+        try:
+            self._request_json(
+                device, f"/rpc/Light.Set?id={channel}&on=true&brightness={level}"
+            )
+        except Exception:
+            self._request_json(device, f"/light/{channel}?turn=on&brightness={level}")
 
     def _request_json(self, device: ShellyDevice, endpoint: str):
         encoded_endpoint = parse.quote(endpoint, safe="/?=&")

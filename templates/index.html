@@ -7,17 +7,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=Fraunces:opsz,wght@9..144,600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='16') }}">
 </head>
 <body>
   <div class="dashboard-shell">
-    <aside class="side-nav" aria-label="Primary">
-      <button class="nav-btn is-active" type="button">Casa</button>
-      <button class="nav-btn" type="button">Luzes</button>
-      <button class="nav-btn" type="button">Cenas</button>
-      <button class="nav-btn" type="button">Estado</button>
-    </aside>
-
     <div class="app-shell">
       <header class="hero">
         <div>
@@ -38,22 +31,13 @@
         <section class="panel" aria-labelledby="devices-title">
           <div class="panel-head">
             <h2 id="devices-title">Dispositivos</h2>
-            <button id="refresh-all" class="ghost" type="button">Atualizar</button>
-          </div>
-          <div class="room-filter" id="room-filter">
-            <button class="chip is-active" type="button" data-room="all">Todas</button>
-            {% for room in rooms %}
-            <button class="chip" type="button" data-room="{{ room }}">{{ room }}</button>
-            {% endfor %}
           </div>
 
           <div class="device-list" id="device-list">
             {% for device in devices %}
-            <button class="device-card is-off" data-device-id="{{ device.id }}" data-room="{{ device.room }}" type="button" data-action="toggle" title="Toggle {{ device.name }}">
-              {% if device.image %}
-              <img class="device-image" src="{{ device.image }}" alt="{{ device.name }}">
-              {% else %}
-              <div class="device-image fallback-icon" aria-hidden="true">💡</div>
+            <button class="device-card is-off {% if device.image %}has-bg-image{% endif %}" data-device-id="{{ device.id }}" data-room="{{ device.room }}" data-component="{{ device.component or 'relay' }}" type="button" data-action="toggle" title="Toggle {{ device.name }}" {% if device.image %}style="--card-bg-image: url('{{ device.image }}');"{% endif %}>
+              {% if not device.image %}
+              <div class="device-image fallback-icon" aria-hidden="true">{% if (device.component or 'relay') == 'cover' %}🪟{% elif (device.component or 'relay') == 'light' %}🔆{% else %}💡{% endif %}</div>
               {% endif %}
               <div class="device-meta">
                 <h3>{{ device.name }}</h3>
@@ -62,79 +46,72 @@
                 <p class="aliases">{{ device.other_names|join(' / ') }}</p>
                 {% endif %}
                 <p class="state" data-state>Checking...</p>
+                {% if (device.component or 'relay') == 'cover' %}
+                <div class="cover-controls" aria-label="Roller controls">
+                  <span class="cover-cmd" data-cover-cmd="open" role="button" tabindex="0">↑</span>
+                  <span class="cover-cmd" data-cover-cmd="close" role="button" tabindex="0">↓</span>
+                  <span class="cover-cmd" data-cover-cmd="stop" role="button" tabindex="0">■</span>
+                </div>
+                {% endif %}
+                {% if (device.component or 'relay') == 'light' %}
+                <div class="cover-controls" aria-label="Dimmer controls">
+                  <span class="cover-cmd" data-light-set="1" role="button" tabindex="0">%</span>
+                </div>
+                {% endif %}
               </div>
             </button>
             {% endfor %}
           </div>
         </section>
-
-        <section class="panel muted">
-          <h2>Ações rápidas</h2>
-          <div class="status-overview" id="status-overview">
-            <p>Total: <strong data-total>0</strong></p>
-            <p>Ligados: <strong data-on>0</strong></p>
-            <p>Offline: <strong data-offline>0</strong></p>
-          </div>
-          <div class="quick-actions">
-            <button class="switch" data-scene="off" type="button">Desligar tudo</button>
-            <button class="switch" data-scene="on" type="button">Ligar tudo</button>
-          </div>
-          <p class="note">As ações rápidas aplicam a todos os dispositivos visíveis no painel.</p>
-
-          <hr class="divider">
-          <h2>Cenas</h2>
-          <form id="scene-form" class="device-form">
-            <label>
-              Nome da cena
-              <input id="scene-name" type="text" maxlength="64" placeholder="Noite, Saída...">
-            </label>
-            <label>
-              Ação
-              <select id="scene-action">
-                <option value="off">Desligar</option>
-                <option value="on">Ligar</option>
-                <option value="toggle">Toggle</option>
-              </select>
-            </label>
-            <label>
-              Divisão
-              <input id="scene-room" type="text" maxlength="64" placeholder="all ou Sala">
-            </label>
-            <button class="switch" type="submit">Guardar cena</button>
-          </form>
-          <div class="scene-list" id="scene-list"></div>
-
-          <hr class="divider">
-          <h2>Editar dispositivo</h2>
-          <form id="device-form" class="device-form">
-            <p class="note" id="device-form-empty">Toque num dispositivo para editar.</p>
-            <input type="hidden" id="form-device-id">
-            <label>
-              Nome
-              <input id="form-display-name" type="text" maxlength="64">
-            </label>
-            <label>
-              Divisão
-              <input id="form-room" type="text" maxlength="64" placeholder="Sala, Cozinha...">
-            </label>
-            <label>
-              Aliases (separados por vírgula)
-              <input id="form-other-names" type="text" maxlength="200">
-            </label>
-            <label>
-              Imagem (URL ou /static/...)
-              <input id="form-image" type="text" maxlength="300">
-            </label>
-            <button class="switch" id="save-device" type="submit">Guardar alterações</button>
-          </form>
-        </section>
       </main>
+    </div>
+  </div>
+
+  <div class="cover-modal" id="cover-modal" hidden>
+    <div class="cover-modal-card" role="dialog" aria-modal="true" aria-labelledby="cover-modal-title">
+      <h3 id="cover-modal-title">Posição do estore</h3>
+      <p class="cover-modal-value" id="cover-modal-value">0%</p>
+      <input id="cover-modal-slider" class="cover-modal-slider" type="range" min="0" max="100" step="1" value="0">
+      <div class="cover-modal-presets" id="cover-modal-presets">
+        <span class="cover-cmd" data-cover-preset="0" role="button" tabindex="0">0%</span>
+        <span class="cover-cmd" data-cover-preset="25" role="button" tabindex="0">25%</span>
+        <span class="cover-cmd" data-cover-preset="50" role="button" tabindex="0">50%</span>
+        <span class="cover-cmd" data-cover-preset="75" role="button" tabindex="0">75%</span>
+        <span class="cover-cmd" data-cover-preset="100" role="button" tabindex="0">100%</span>
+      </div>
+      <div class="cover-modal-actions">
+        <button type="button" class="cover-modal-btn" id="cover-modal-cancel">Cancelar</button>
+        <button type="button" class="cover-modal-btn is-primary" id="cover-modal-save">Aplicar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="cover-modal" id="light-modal" hidden>
+    <div class="cover-modal-card" role="dialog" aria-modal="true" aria-labelledby="light-modal-title">
+      <h3 id="light-modal-title">Intensidade da luz</h3>
+      <p class="cover-modal-value" id="light-modal-value">0%</p>
+      <input id="light-modal-slider" class="cover-modal-slider" type="range" min="0" max="100" step="1" value="0">
+      <div class="cover-controls" aria-label="Ajuste fino dimmer">
+        <span class="cover-cmd" data-light-modal-step="down" role="button" tabindex="0">-5%</span>
+        <span class="cover-cmd" data-light-modal-step="up" role="button" tabindex="0">+5%</span>
+      </div>
+      <div class="cover-modal-presets" id="light-modal-presets">
+        <span class="cover-cmd" data-light-preset="0" role="button" tabindex="0">0%</span>
+        <span class="cover-cmd" data-light-preset="25" role="button" tabindex="0">25%</span>
+        <span class="cover-cmd" data-light-preset="50" role="button" tabindex="0">50%</span>
+        <span class="cover-cmd" data-light-preset="75" role="button" tabindex="0">75%</span>
+        <span class="cover-cmd" data-light-preset="100" role="button" tabindex="0">100%</span>
+      </div>
+      <div class="cover-modal-actions">
+        <button type="button" class="cover-modal-btn" id="light-modal-cancel">Cancelar</button>
+        <button type="button" class="cover-modal-btn is-primary" id="light-modal-save">Aplicar</button>
+      </div>
     </div>
   </div>
 
   <script>
     window.__CONFIGURED_DEVICES__ = {{ devices|tojson }};
   </script>
-  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script src="{{ url_for('static', filename='app.js', v='16') }}"></script>
 </body>
 </html>

@@ -1,21 +1,55 @@
 (function () {
   var deviceList = document.getElementById("device-list");
-  var refreshButton = document.getElementById("refresh-all");
   var clockWidget = document.getElementById("clock-widget");
-  var roomFilter = document.getElementById("room-filter");
-  var statusOverview = document.getElementById("status-overview");
-  var deviceForm = document.getElementById("device-form");
-  var formEmpty = document.getElementById("device-form-empty");
-  var sceneForm = document.getElementById("scene-form");
-  var sceneList = document.getElementById("scene-list");
-
-  var configuredDevices = Array.isArray(window.__CONFIGURED_DEVICES__)
-    ? window.__CONFIGURED_DEVICES__
-    : [];
-  var activeRoom = "all";
+  var coverModal = document.getElementById("cover-modal");
+  var coverModalValue = document.getElementById("cover-modal-value");
+  var coverModalSlider = document.getElementById("cover-modal-slider");
+  var coverModalPresets = document.getElementById("cover-modal-presets");
+  var coverModalCancel = document.getElementById("cover-modal-cancel");
+  var coverModalSave = document.getElementById("cover-modal-save");
+  var lightModal = document.getElementById("light-modal");
+  var lightModalValue = document.getElementById("light-modal-value");
+  var lightModalSlider = document.getElementById("light-modal-slider");
+  var lightModalPresets = document.getElementById("light-modal-presets");
+  var lightModalCancel = document.getElementById("light-modal-cancel");
+  var lightModalSave = document.getElementById("light-modal-save");
   var refreshInFlight = false;
-  var refreshModules = [];
   var statusTimer = null;
+  var activeCoverCard = null;
+  var activeLightCard = null;
+  var touchStartX = 0;
+  var touchStartY = 0;
+  var touchMoved = false;
+  var suppressClickUntil = 0;
+  var debugEnabled = /[?&]debug=1\b/.test(window.location.search);
+  var debugBox = null;
+
+  function debugLog(message) {
+    if (!debugEnabled) {
+      return;
+    }
+    if (!debugBox) {
+      debugBox = document.createElement("pre");
+      debugBox.id = "debug-box";
+      debugBox.style.position = "fixed";
+      debugBox.style.left = "8px";
+      debugBox.style.right = "8px";
+      debugBox.style.bottom = "8px";
+      debugBox.style.maxHeight = "38vh";
+      debugBox.style.overflow = "auto";
+      debugBox.style.margin = "0";
+      debugBox.style.padding = "8px";
+      debugBox.style.background = "rgba(0,0,0,0.78)";
+      debugBox.style.color = "#f3f3f3";
+      debugBox.style.fontSize = "12px";
+      debugBox.style.lineHeight = "1.3";
+      debugBox.style.zIndex = "9999";
+      debugBox.style.borderRadius = "8px";
+      document.body.appendChild(debugBox);
+    }
+    debugBox.textContent += new Date().toISOString().slice(11, 19) + " " + message + "\n";
+    debugBox.scrollTop = debugBox.scrollHeight;
+  }
 
   function requestJSON(method, url, payload, done) {
     var xhr = new XMLHttpRequest();
@@ -27,25 +61,18 @@
       }
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
+          debugLog("HTTP " + method + " " + url + " -> " + xhr.status);
           done(null, JSON.parse(xhr.responseText));
         } catch (_err) {
+          debugLog("HTTP " + method + " " + url + " JSON parse error");
           done(new Error("Invalid JSON"));
         }
         return;
       }
+      debugLog("HTTP " + method + " " + url + " -> " + xhr.status);
       done(new Error("Request failed"));
     };
     xhr.send(payload ? JSON.stringify(payload) : null);
-  }
-
-  function byId(arr, id) {
-    var i;
-    for (i = 0; i < arr.length; i += 1) {
-      if (arr[i] && arr[i].id === id) {
-        return arr[i];
-      }
-    }
-    return null;
   }
 
   function closestWithAttr(node, attrName) {
@@ -65,44 +92,14 @@
     }
   }
 
-  function applyRoomFilter() {
-    var cards = document.querySelectorAll(".device-card[data-device-id]");
-    eachNode(cards, function (card) {
-      var visible = activeRoom === "all" || card.getAttribute("data-room") === activeRoom;
-      card.hidden = !visible;
-    });
-  }
-
-  function repaintOverview() {
-    if (!statusOverview) {
-      return;
-    }
-    var cards = document.querySelectorAll(".device-card[data-device-id]");
-    var total = 0;
-    var onCount = 0;
-    var offlineCount = 0;
-    eachNode(cards, function (card) {
-      if (card.hidden) {
-        return;
-      }
-      total += 1;
-      if (card.classList.contains("is-on")) {
-        onCount += 1;
-      }
-      if (card.classList.contains("is-error")) {
-        offlineCount += 1;
-      }
-    });
-    statusOverview.querySelector("[data-total]").textContent = String(total);
-    statusOverview.querySelector("[data-on]").textContent = String(onCount);
-    statusOverview.querySelector("[data-offline]").textContent = String(offlineCount);
-  }
-
   function paintCard(card, info) {
     var stateNode = card.querySelector("[data-state]");
+    var component = (card.getAttribute("data-component") || "relay").toLowerCase();
+
     if (!stateNode) {
       return;
     }
+
     card.classList.remove("is-on", "is-off", "is-error", "is-busy");
     stateNode.classList.remove("is-on", "is-off", "is-error");
 
@@ -110,7 +107,39 @@
       stateNode.textContent = "Offline";
       card.classList.add("is-error");
       stateNode.classList.add("is-error");
-      repaintOverview();
+      return;
+    }
+
+    if (component === "cover") {
+      if (typeof info.position === "number") {
+        stateNode.textContent = String(info.position) + "%";
+      } else if (info.state === "open") {
+        stateNode.textContent = "100%";
+      } else if (info.state === "closed") {
+        stateNode.textContent = "0%";
+      } else {
+        stateNode.textContent = "--%";
+      }
+      card.classList.add("is-on");
+      stateNode.classList.add("is-on");
+      return;
+    }
+
+    if (component === "light") {
+      if (typeof info.brightness === "number") {
+        stateNode.textContent = String(info.brightness) + "%";
+      } else if (info.state === "on") {
+        stateNode.textContent = "On";
+      } else {
+        stateNode.textContent = "Off";
+      }
+      if (info.state === "on") {
+        card.classList.add("is-on");
+        stateNode.classList.add("is-on");
+      } else {
+        card.classList.add("is-off");
+        stateNode.classList.add("is-off");
+      }
       return;
     }
 
@@ -123,56 +152,171 @@
       card.classList.add("is-off");
       stateNode.classList.add("is-off");
     }
-    repaintOverview();
   }
 
-  function pickDevice(deviceId) {
-    var cards = document.querySelectorAll(".device-card[data-device-id]");
-    eachNode(cards, function (card) {
-      card.classList.toggle("is-selected", card.getAttribute("data-device-id") === deviceId);
-    });
-
-    if (!deviceForm) {
-      return;
+  function parsePercentText(text) {
+    var parsed = parseInt(String(text || "").replace("%", ""), 10);
+    if (isNaN(parsed)) {
+      return 0;
     }
-    var device = byId(configuredDevices, deviceId);
-    if (!device) {
-      return;
+    if (parsed < 0) {
+      return 0;
     }
-    if (formEmpty) {
-      formEmpty.hidden = true;
+    if (parsed > 100) {
+      return 100;
     }
-    document.getElementById("form-device-id").value = device.id;
-    document.getElementById("form-display-name").value = device.display_name || device.name || "";
-    document.getElementById("form-room").value = device.room || "Casa";
-    document.getElementById("form-other-names").value = (device.other_names || []).join(", ");
-    document.getElementById("form-image").value = device.image || "";
+    return parsed;
   }
 
-  function renderScenes(scenes) {
-    if (!sceneList) {
+  function closeCoverModal() {
+    if (!coverModal) {
       return;
     }
-    if (!scenes || !scenes.length) {
-      sceneList.innerHTML = '<p class="note">Sem cenas guardadas.</p>';
-      return;
-    }
-    var html = "";
-    var i;
-    for (i = 0; i < scenes.length; i += 1) {
-      html += '<div class="scene-item" data-scene-id="' + scenes[i].id + '">';
-      html += "<div><strong>" + scenes[i].name + "</strong><br><small>";
-      html += String(scenes[i].action || "").toUpperCase() + " · " + scenes[i].room;
-      html += "</small></div>";
-      html += '<button type="button" data-run-scene="' + scenes[i].id + '">Executar</button>';
-      html += '<button type="button" data-delete-scene="' + scenes[i].id + '">Apagar</button>';
-      html += "</div>";
-    }
-    sceneList.innerHTML = html;
+    coverModal.hidden = true;
+    activeCoverCard = null;
   }
 
-  function registerRefreshModule(name, refreshFn) {
-    refreshModules.push({ name: name, refreshFn: refreshFn });
+  function closeLightModal() {
+    if (!lightModal) {
+      return;
+    }
+    lightModal.hidden = true;
+    activeLightCard = null;
+  }
+
+  function openCoverModal(card) {
+    var stateNode;
+    var current;
+    if (!coverModal || !coverModalSlider || !coverModalValue) {
+      return;
+    }
+    stateNode = card.querySelector("[data-state]");
+    current = parsePercentText(stateNode ? stateNode.textContent : "0");
+    activeCoverCard = card;
+    coverModalSlider.value = String(current);
+    coverModalValue.textContent = String(current) + "%";
+    coverModal.hidden = false;
+    debugLog("Open cover modal for " + card.getAttribute("data-device-id"));
+  }
+
+  function openLightModal(card) {
+    var stateNode;
+    var current;
+    if (!lightModal || !lightModalSlider || !lightModalValue) {
+      return;
+    }
+    stateNode = card.querySelector("[data-state]");
+    current = parsePercentText(stateNode ? stateNode.textContent : "0");
+    activeLightCard = card;
+    lightModalSlider.value = String(current);
+    lightModalValue.textContent = String(current) + "%";
+    lightModal.hidden = false;
+    debugLog("Open light modal for " + card.getAttribute("data-device-id"));
+  }
+
+  function setSliderAndLabel(slider, label, value) {
+    var clamped = parsePercentText(value);
+    if (slider) {
+      slider.value = String(clamped);
+    }
+    if (label) {
+      label.textContent = String(clamped) + "%";
+    }
+  }
+
+  function nudgeSlider(slider, label, delta) {
+    var current = parsePercentText(slider ? slider.value : 0);
+    setSliderAndLabel(slider, label, current + delta);
+  }
+
+  function setCoverPosition(card, position) {
+    requestJSON(
+      "POST",
+      "/api/shelly/" + card.getAttribute("data-device-id") + "/position",
+      { position: position },
+      function (_err, result) {
+        paintCard(card, _err ? null : result);
+      }
+    );
+  }
+
+  function setLightBrightness(card, brightness) {
+    requestJSON(
+      "POST",
+      "/api/shelly/" + card.getAttribute("data-device-id") + "/light_level",
+      { brightness: brightness },
+      function (_err, result) {
+        paintCard(card, _err ? null : result);
+      }
+    );
+  }
+
+  function handleDeviceListActivate(target) {
+    var coverCmd = closestWithAttr(target, "data-cover-cmd");
+    var lightSet = closestWithAttr(target, "data-light-set");
+    var card = closestWithAttr(target, "data-device-id");
+    var component;
+
+    if (!card || card.disabled) {
+      debugLog("Activate ignored (no card or disabled)");
+      return;
+    }
+
+    debugLog(
+      "Activate on " +
+        card.getAttribute("data-device-id") +
+        " comp=" +
+        (card.getAttribute("data-component") || "relay")
+    );
+
+    if (coverCmd) {
+      requestJSON(
+        "POST",
+        "/api/shelly/" + card.getAttribute("data-device-id") + "/cover_action",
+        { command: coverCmd.getAttribute("data-cover-cmd") },
+        function (_err, result) {
+          paintCard(card, _err ? null : result);
+        }
+      );
+      return;
+    }
+
+    if (lightSet) {
+      debugLog("light % pressed");
+      openLightModal(card);
+      return;
+    }
+
+    component = (card.getAttribute("data-component") || "relay").toLowerCase();
+    if (component === "cover") {
+      openCoverModal(card);
+      return;
+    }
+
+    if (component === "light") {
+      requestJSON(
+        "POST",
+        "/api/shelly/" + card.getAttribute("data-device-id") + "/light_action",
+        { command: card.classList.contains("is-on") ? "off" : "on" },
+        function (_err, result) {
+          paintCard(card, _err ? null : result);
+        }
+      );
+      return;
+    }
+
+    card.disabled = true;
+    card.classList.add("is-busy");
+    requestJSON(
+      "POST",
+      "/api/shelly/" + card.getAttribute("data-device-id") + "/action",
+      { action: card.getAttribute("data-action") || "toggle" },
+      function (_err, result) {
+        paintCard(card, _err ? null : result);
+        card.disabled = false;
+        card.classList.remove("is-busy");
+      }
+    );
   }
 
   function refreshDeviceStates(done) {
@@ -205,32 +349,8 @@
         }
         paintCard(card, info);
       }
-      done();
-    });
-  }
 
-  function refreshScenesModule(done) {
-    if (!sceneList) {
       done();
-      return;
-    }
-    requestJSON("GET", "/api/scenes", null, function (_err, scenes) {
-      if (_err) {
-        sceneList.innerHTML = '<p class="note">Falha ao carregar cenas.</p>';
-      } else {
-        renderScenes(scenes);
-      }
-      done();
-    });
-  }
-
-  function runRefreshModule(index, done) {
-    if (index >= refreshModules.length) {
-      done();
-      return;
-    }
-    refreshModules[index].refreshFn(function () {
-      runRefreshModule(index + 1, done);
     });
   }
 
@@ -239,35 +359,21 @@
       return;
     }
     refreshInFlight = true;
-    runRefreshModule(0, function () {
+    refreshDeviceStates(function () {
       refreshInFlight = false;
     });
   }
 
-  function runScene(action) {
-    var cards = document.querySelectorAll(".device-card[data-device-id]");
-    eachNode(cards, function (card) {
-      if (card.hidden) {
-        return;
-      }
-      requestJSON(
-        "POST",
-        "/api/shelly/" + card.getAttribute("data-device-id") + "/action",
-        { action: action },
-        function (_err, result) {
-          paintCard(card, _err ? null : result);
-        }
-      );
-    });
-  }
-
   function tickClock() {
+    var now;
+    var hh;
+    var mm;
     if (!clockWidget) {
       return;
     }
-    var now = new Date();
-    var hh = String(now.getHours());
-    var mm = String(now.getMinutes());
+    now = new Date();
+    hh = String(now.getHours());
+    mm = String(now.getMinutes());
     if (hh.length < 2) {
       hh = "0" + hh;
     }
@@ -290,140 +396,162 @@
   }
 
   if (deviceList) {
+    deviceList.addEventListener("touchstart", function (event) {
+      var touch;
+      if (!event.touches || !event.touches.length) {
+        return;
+      }
+      touch = event.touches[0];
+      touchStartX = touch.clientX;
+      touchStartY = touch.clientY;
+      touchMoved = false;
+    });
+
+    deviceList.addEventListener("touchmove", function (event) {
+      var touch;
+      var dx;
+      var dy;
+      if (!event.touches || !event.touches.length) {
+        return;
+      }
+      touch = event.touches[0];
+      dx = Math.abs(touch.clientX - touchStartX);
+      dy = Math.abs(touch.clientY - touchStartY);
+      if (dx > 10 || dy > 10) {
+        touchMoved = true;
+      }
+    });
+
     deviceList.addEventListener("click", function (event) {
-      var card = closestWithAttr(event.target, "data-device-id");
-      if (!card || card.disabled) {
+      if (Date.now() < suppressClickUntil) {
         return;
       }
-      pickDevice(card.getAttribute("data-device-id"));
-      card.disabled = true;
-      card.classList.add("is-busy");
-      requestJSON(
-        "POST",
-        "/api/shelly/" + card.getAttribute("data-device-id") + "/action",
-        { action: card.getAttribute("data-action") || "toggle" },
-        function (_err, result) {
-          paintCard(card, _err ? null : result);
-          card.disabled = false;
-          card.classList.remove("is-busy");
-        }
-      );
+      debugLog("click event");
+      handleDeviceListActivate(event.target);
+    });
+
+    deviceList.addEventListener("touchend", function (event) {
+      if (touchMoved) {
+        debugLog("touchend ignored (scroll)");
+        suppressClickUntil = Date.now() + 400;
+        return;
+      }
+      debugLog("touchend event");
+      handleDeviceListActivate(event.target);
+      if (
+        closestWithAttr(event.target, "data-cover-cmd") ||
+        closestWithAttr(event.target, "data-light-set")
+      ) {
+        event.preventDefault();
+      }
+      suppressClickUntil = Date.now() + 400;
     });
   }
 
-  if (roomFilter) {
-    roomFilter.addEventListener("click", function (event) {
-      var chip = closestWithAttr(event.target, "data-room");
-      if (!chip) {
-        return;
-      }
-      activeRoom = chip.getAttribute("data-room") || "all";
-      eachNode(roomFilter.querySelectorAll(".chip"), function (node) {
-        node.classList.toggle("is-active", node.getAttribute("data-room") === activeRoom);
-      });
-      applyRoomFilter();
-      repaintOverview();
+  debugLog("Debug enabled");
+
+  if (coverModalSlider && coverModalValue) {
+    coverModalSlider.addEventListener("input", function () {
+      coverModalValue.textContent = String(coverModalSlider.value) + "%";
+    });
+    coverModalSlider.addEventListener("change", function () {
+      coverModalValue.textContent = String(coverModalSlider.value) + "%";
     });
   }
 
-  if (refreshButton) {
-    refreshButton.addEventListener("click", refreshAll);
-  }
-
-  eachNode(document.querySelectorAll("[data-scene]"), function (button) {
-    button.addEventListener("click", function () {
-      var action = button.getAttribute("data-scene");
-      if (action !== "on" && action !== "off") {
+  if (coverModalPresets) {
+    coverModalPresets.addEventListener("click", function (event) {
+      var preset = closestWithAttr(event.target, "data-cover-preset");
+      if (!preset) {
         return;
       }
-      button.disabled = true;
-      runScene(action);
-      setTimeout(function () {
-        button.disabled = false;
-      }, 900);
-    });
-  });
-
-  if (deviceForm) {
-    deviceForm.addEventListener("submit", function (event) {
-      var deviceId;
-      var saveButton;
-      event.preventDefault();
-      deviceId = document.getElementById("form-device-id").value;
-      if (!deviceId) {
-        return;
-      }
-      saveButton = document.getElementById("save-device");
-      saveButton.disabled = true;
-      requestJSON(
-        "POST",
-        "/api/shelly/" + deviceId + "/config",
-        {
-          display_name: document.getElementById("form-display-name").value,
-          room: document.getElementById("form-room").value,
-          other_names: document.getElementById("form-other-names").value,
-          image: document.getElementById("form-image").value,
-        },
-        function () {
-          window.location.reload();
-        }
-      );
+      setSliderAndLabel(coverModalSlider, coverModalValue, preset.getAttribute("data-cover-preset"));
     });
   }
 
-  if (sceneForm) {
-    sceneForm.addEventListener("submit", function (event) {
-      var name;
-      var action;
-      var room;
-      event.preventDefault();
-      name = document.getElementById("scene-name").value.replace(/^\s+|\s+$/g, "");
-      action = document.getElementById("scene-action").value;
-      room = document.getElementById("scene-room").value.replace(/^\s+|\s+$/g, "") || "all";
-      if (!name) {
-        return;
-      }
-      requestJSON("POST", "/api/scenes", { name: name, action: action, room: room }, function () {
-        requestJSON("GET", "/api/scenes", null, function (_err, scenes) {
-          if (!_err) {
-            renderScenes(scenes);
-          }
-          sceneForm.reset();
-        });
-      });
+  if (coverModalCancel) {
+    coverModalCancel.addEventListener("click", function () {
+      closeCoverModal();
     });
   }
 
-  if (sceneList) {
-    sceneList.addEventListener("click", function (event) {
-      var runButton = closestWithAttr(event.target, "data-run-scene");
-      var deleteButton = closestWithAttr(event.target, "data-delete-scene");
-
-      if (runButton) {
-        requestJSON(
-          "POST",
-          "/api/scenes/" + runButton.getAttribute("data-run-scene") + "/run",
-          {},
-          function () {
-            refreshAll();
-          }
-        );
+  if (coverModalSave) {
+    coverModalSave.addEventListener("click", function () {
+      var value;
+      if (!activeCoverCard || !coverModalSlider) {
+        closeCoverModal();
         return;
       }
+      value = parsePercentText(coverModalSlider.value);
+      setCoverPosition(activeCoverCard, value);
+      closeCoverModal();
+    });
+  }
 
-      if (deleteButton) {
-        requestJSON(
-          "DELETE",
-          "/api/scenes/" + deleteButton.getAttribute("data-delete-scene"),
-          null,
-          function () {
-            requestJSON("GET", "/api/scenes", null, function (_err, scenes) {
-              if (!_err) {
-                renderScenes(scenes);
-              }
-            });
-          }
-        );
+  if (coverModal) {
+    coverModal.addEventListener("click", function (event) {
+      if (event.target === coverModal) {
+        closeCoverModal();
+      }
+    });
+  }
+
+  if (lightModalSlider && lightModalValue) {
+    lightModalSlider.addEventListener("input", function () {
+      lightModalValue.textContent = String(lightModalSlider.value) + "%";
+    });
+    lightModalSlider.addEventListener("change", function () {
+      lightModalValue.textContent = String(lightModalSlider.value) + "%";
+    });
+  }
+
+  if (lightModalPresets) {
+    lightModalPresets.addEventListener("click", function (event) {
+      var preset = closestWithAttr(event.target, "data-light-preset");
+      if (!preset) {
+        return;
+      }
+      setSliderAndLabel(lightModalSlider, lightModalValue, preset.getAttribute("data-light-preset"));
+    });
+  }
+
+  if (lightModal) {
+    lightModal.addEventListener("click", function (event) {
+      var stepBtn = closestWithAttr(event.target, "data-light-modal-step");
+      if (!stepBtn) {
+        return;
+      }
+      if (stepBtn.getAttribute("data-light-modal-step") === "up") {
+        nudgeSlider(lightModalSlider, lightModalValue, 5);
+      } else {
+        nudgeSlider(lightModalSlider, lightModalValue, -5);
+      }
+    });
+  }
+
+  if (lightModalCancel) {
+    lightModalCancel.addEventListener("click", function () {
+      closeLightModal();
+    });
+  }
+
+  if (lightModalSave) {
+    lightModalSave.addEventListener("click", function () {
+      var value;
+      if (!activeLightCard || !lightModalSlider) {
+        closeLightModal();
+        return;
+      }
+      value = parsePercentText(lightModalSlider.value);
+      setLightBrightness(activeLightCard, value);
+      closeLightModal();
+    });
+  }
+
+  if (lightModal) {
+    lightModal.addEventListener("click", function (event) {
+      if (event.target === lightModal) {
+        closeLightModal();
       }
     });
   }
@@ -434,10 +562,6 @@
     }
   });
 
-  registerRefreshModule("devices", refreshDeviceStates);
-  registerRefreshModule("scenes", refreshScenesModule);
-
-  applyRoomFilter();
   tickClock();
   setInterval(tickClock, 1000);
   refreshAll();

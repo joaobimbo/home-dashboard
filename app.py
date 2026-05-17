@@ -96,5 +96,49 @@ def shelly_action(device_id):
     return jsonify(result), status_code
 
 
+@app.route("/api/shelly/<device_id>/position", methods=["POST"])
+def shelly_cover_position(device_id):
+    payload = request.get_json(silent=True) or {}
+    try:
+        position = int(payload.get("position"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Invalid position"}), 400
+
+    result = controller.set_cover_position(device_id, position)
+    status_code = 200 if result.get("ok") else 400
+    return jsonify(result), status_code
+
+
+@app.route("/api/shelly/<device_id>/cover_action", methods=["POST"])
+def shelly_cover_action(device_id):
+    payload = request.get_json(silent=True) or {}
+    command = str(payload.get("command", "")).strip().lower()
+    result = controller.apply_cover_command(device_id, command)
+    status_code = 200 if result.get("ok") else 400
+    return jsonify(result), status_code
+
+
+@app.route("/api/shelly/<device_id>/light_action", methods=["POST"])
+def shelly_light_action(device_id):
+    payload = request.get_json(silent=True) or {}
+    command = str(payload.get("command", "")).strip().lower()
+    result = controller.apply_light_command(device_id, command)
+    status_code = 200 if result.get("ok") else 400
+    return jsonify(result), status_code
+
+
+@app.route("/api/shelly/<device_id>/light_level", methods=["POST"])
+def shelly_light_level(device_id):
+    payload = request.get_json(silent=True) or {}
+    try:
+        level = int(payload.get("brightness"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Invalid brightness"}), 400
+
+    result = controller.set_light_brightness(device_id, level)
+    status_code = 200 if result.get("ok") else 400
+    return jsonify(result), status_code
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)

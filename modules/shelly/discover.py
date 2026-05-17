@@ -57,6 +57,43 @@ def http_json(url: str, timeout: float):
         return json.loads(body)
 
 
+def output_label(component: str, channel: int):
+    if component == "cover":
+        return f"Shutter {channel + 1}"
+    if component == "light":
+        return f"Dimmer {channel + 1}"
+    return f"Switch {channel + 1}"
+
+
+def build_entry(
+    host: str,
+    model: str,
+    device_name: str,
+    component: str,
+    relay: int,
+    channel_name: str,
+):
+    base_name = (
+        channel_name.strip() or device_name.strip() or f"{model} {host.split('.')[-1]}"
+    )
+    if channel_name.strip() or not device_name.strip() or component == "relay":
+        display_name = base_name
+    else:
+        display_name = f"{base_name} {output_label(component, relay)}"
+
+    return {
+        "id": slugify(f"{display_name}-{host}-{component}-{relay}"),
+        "device_name": device_name.strip() or base_name,
+        "display_name": display_name,
+        "other_names": [],
+        "room": "Casa",
+        "host": host,
+        "component": component,
+        "relay": relay,
+        "image": "",
+    }
+
+
 def probe_host(host: str, timeout: float) -> Optional[Dict[str, object]]:
     try:
         with socket.create_connection((host, 80), timeout=timeout):
@@ -66,33 +103,83 @@ def probe_host(host: str, timeout: float) -> Optional[Dict[str, object]]:
 
     model = "Shelly"
     device_name = ""
+    entries: List[Dict[str, object]] = []
 
     try:
-        data = http_json(f"http://{host}/shelly", timeout)
-        model = data.get("type") or data.get("model") or model
+        legacy_info = http_json(f"http://{host}/shelly", timeout)
+        model = legacy_info.get("type") or legacy_info.get("model") or model
         settings = http_json(f"http://{host}/settings", timeout)
         device_name = settings.get("name") or ""
+
+        relays = settings.get("relays")
+        if isinstance(relays, list) and relays:
+            for idx, relay_conf in enumerate(relays):
+                relay_name = ""
+                if isinstance(relay_conf, dict):
+                    relay_name = str(relay_conf.get("name", ""))
+                entries.append(
+                    build_entry(host, model, device_name, "relay", idx, relay_name)
+                )
+
+        lights = settings.get("lights")
+        if isinstance(lights, list) and lights:
+            for idx, light_conf in enumerate(lights):
+                light_name = ""
+                if isinstance(light_conf, dict):
+                    light_name = str(light_conf.get("name", ""))
+                entries.append(
+                    build_entry(host, model, device_name, "light", idx, light_name)
+                )
+
+        rollers = settings.get("rollers")
+        if isinstance(rollers, list) and rollers:
+            for idx, roller_conf in enumerate(rollers):
+                roller_name = ""
+                if isinstance(roller_conf, dict):
+                    roller_name = str(roller_conf.get("name", ""))
+                entries.append(
+                    build_entry(host, model, device_name, "cover", idx, roller_name)
+                )
     except Exception:
-        try:
-            data = http_json(f"http://{host}/rpc/Shelly.GetDeviceInfo", timeout)
-            model = data.get("model") or model
-            device_name = data.get("name") or ""
-        except Exception:
+        pass
+
+    if entries:
+        return {"host": host, "entries": entries}
+
+    try:
+        info = http_json(f"http://{host}/rpc/Shelly.GetDeviceInfo", timeout)
+        model = info.get("model") or model
+
+        config = http_json(f"http://{host}/rpc/Shelly.GetConfig", timeout)
+        if not isinstance(config, dict):
             return None
+        device_cfg = config.get("device", {}) if isinstance(config, dict) else {}
+        if isinstance(device_cfg, dict):
+            device_name = str(device_cfg.get("name") or "")
 
-    if not device_name:
-        device_name = f"{model} {host.split('.')[-1]}"
+        for key, value in config.items():
+            if not isinstance(value, dict):
+                continue
+            if ":" not in key:
+                continue
+            component, channel_text = key.split(":", 1)
+            if component not in {"switch", "cover", "light"}:
+                continue
+            try:
+                channel = int(channel_text)
+            except ValueError:
+                continue
+            channel_name = str(value.get("name") or "")
+            entries.append(
+                build_entry(host, model, device_name, component, channel, channel_name)
+            )
+    except Exception:
+        return None
 
-    return {
-        "id": slugify(device_name),
-        "device_name": device_name,
-        "display_name": device_name,
-        "other_names": [],
-        "room": "Casa",
-        "host": host,
-        "relay": 0,
-        "image": "",
-    }
+    if not entries:
+        entries.append(build_entry(host, model, device_name, "switch", 0, ""))
+
+    return {"host": host, "entries": entries}
 
 
 def scan_network(cidr: str, timeout: float, workers: int):
@@ -104,13 +191,11 @@ def scan_network(cidr: str, timeout: float, workers: int):
         futures = {pool.submit(probe_host, host, timeout): host for host in hosts}
         for future in as_completed(futures):
             result = future.result()
-            if result:
-                devices.append(result)
+            if result and isinstance(result.get("entries"), list):
+                devices.extend(result["entries"])
 
-    unique_by_host = {device["host"]: device for device in devices}
-    deduped = list(unique_by_host.values())
-    deduped.sort(key=lambda d: d["host"])
-    return deduped
+    devices.sort(key=lambda d: (d["host"], int(d.get("relay", 0))))
+    return devices
 
 
 def load_existing(path: Path):
@@ -126,23 +211,47 @@ def load_existing(path: Path):
 def merge_manual_fields(
     found: List[Dict[str, object]], existing: List[Dict[str, object]]
 ):
-    existing_by_host = {item.get("host"): item for item in existing}
+    existing_by_key = {}
+    for item in existing:
+        key = (
+            item.get("host"),
+            str(item.get("component", "relay")),
+            int(item.get("relay", 0)) if item.get("relay") is not None else 0,
+        )
+        existing_by_key[key] = item
+
     for device in found:
-        current = existing_by_host.get(device["host"])
+        key = (
+            device.get("host"),
+            str(device.get("component", "relay")),
+            int(device.get("relay", 0)),
+        )
+        current = existing_by_key.get(key)
         if not current:
             continue
-        if current.get("display_name"):
-            device["display_name"] = current["display_name"]
-            device["id"] = slugify(current["display_name"])
-        elif current.get("name"):
-            device["display_name"] = current["name"]
-            device["id"] = slugify(current["name"])
+
+        current_display = str(current.get("display_name") or "").strip()
+        current_device_name = str(
+            current.get("device_name") or current.get("name") or ""
+        ).strip()
+
+        # Preserve display_name only when it looks like a manual override.
+        # If it matches auto-generated fields, keep the newly discovered name.
+        if current_display and current_display not in {
+            current_device_name,
+            str(current.get("id") or "").strip(),
+        }:
+            device["display_name"] = current_display
+            device["id"] = slugify(current_display)
+
         if isinstance(current.get("other_names"), list):
             device["other_names"] = [str(name) for name in current["other_names"]]
         if current.get("room"):
             device["room"] = str(current["room"])
         if current.get("image"):
             device["image"] = current["image"]
+        if current.get("component"):
+            device["component"] = str(current["component"])
         if current.get("relay") is not None:
             try:
                 device["relay"] = int(current["relay"])
