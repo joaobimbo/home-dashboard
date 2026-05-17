@@ -14,6 +14,7 @@ let configuredDevices = Array.isArray(window.__CONFIGURED_DEVICES__)
 let activeRoom = "all";
 let statusTimer = null;
 let refreshInFlight = false;
+const refreshModules = [];
 
 async function fetchStatus() {
   const res = await fetch("/api/shelly/devices");
@@ -173,6 +174,23 @@ async function refreshAll() {
   }
   refreshInFlight = true;
   try {
+    for (const module of refreshModules) {
+      try {
+        await module.refreshFn();
+      } catch (_err) {
+      }
+    }
+  } finally {
+    refreshInFlight = false;
+  }
+}
+
+function registerRefreshModule(name, refreshFn) {
+  refreshModules.push({ name, refreshFn });
+}
+
+async function refreshDeviceStates() {
+  try {
     const statuses = await fetchStatus();
     const statusMap = new Map(statuses.map((entry) => [entry.id, entry]));
     document.querySelectorAll(".device-card[data-device-id]").forEach((card) => {
@@ -182,8 +200,18 @@ async function refreshAll() {
     document.querySelectorAll(".device-card[data-device-id]").forEach((card) => {
       paintCard(card, null);
     });
-  } finally {
-    refreshInFlight = false;
+  }
+}
+
+async function refreshScenesModule() {
+  if (!sceneList) {
+    return;
+  }
+  try {
+    const scenes = await fetchScenes();
+    renderScenes(scenes);
+  } catch (_err) {
+    sceneList.innerHTML = '<p class="note">Falha ao carregar cenas.</p>';
   }
 }
 
@@ -350,16 +378,11 @@ document.addEventListener("visibilitychange", () => {
 });
 
 async function bootstrap() {
+  registerRefreshModule("devices", refreshDeviceStates);
+  registerRefreshModule("scenes", refreshScenesModule);
+
   applyRoomFilter();
   await refreshAll();
-  try {
-    const scenes = await fetchScenes();
-    renderScenes(scenes);
-  } catch (_err) {
-    if (sceneList) {
-      sceneList.innerHTML = '<p class="note">Falha ao carregar cenas.</p>';
-    }
-  }
 
   startStatusPolling();
 }
