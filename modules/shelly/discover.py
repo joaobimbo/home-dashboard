@@ -28,7 +28,7 @@ def parse_args():
     parser.add_argument(
         "--timeout",
         type=float,
-        default=0.5,
+        default=1.5,
         help="Per-host timeout in seconds",
     )
     parser.add_argument(
