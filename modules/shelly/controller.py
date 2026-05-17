@@ -11,6 +11,7 @@ class ShellyDevice:
     id: str
     display_name: str
     host: str
+    device_name: str = ""
     relay: int = 0
     image: str = ""
     room: str = "Casa"
@@ -67,6 +68,12 @@ class ShellyController:
                     or item.get("name")
                     or item["id"],
                     host=item["host"],
+                    device_name=str(
+                        item.get("device_name")
+                        or item.get("display_name")
+                        or item.get("name")
+                        or item["id"]
+                    ),
                     relay=int(item.get("relay", 0)),
                     image=str(item.get("image", "")),
                     room=str(item.get("room", "Casa")),
@@ -91,6 +98,12 @@ class ShellyController:
                         or item.get("name")
                         or item["id"],
                         host=item["host"],
+                        device_name=str(
+                            item.get("device_name")
+                            or item.get("display_name")
+                            or item.get("name")
+                            or item["id"]
+                        ),
                         relay=int(item.get("relay", 0)),
                         image=str(item.get("image", "")),
                         room=str(item.get("room", "Casa")),
@@ -145,6 +158,7 @@ class ShellyController:
             id=device.id,
             display_name=display_name or device.id,
             host=device.host,
+            device_name=device.device_name,
             relay=device.relay,
             image=image,
             room=room,
@@ -163,6 +177,7 @@ class ShellyController:
     def _device_to_dict(self, device: ShellyDevice):
         return {
             "id": device.id,
+            "device_name": device.device_name,
             "display_name": device.display_name,
             "host": device.host,
             "relay": device.relay,
@@ -170,6 +185,20 @@ class ShellyController:
             "room": device.room,
             "other_names": device.other_names,
         }
+
+    def reorder_devices(self, ordered_ids: List[str]):
+        if not ordered_ids:
+            return {"ok": False, "error": "No device ids provided"}
+
+        current_ids = [device.id for device in self.devices]
+        if set(ordered_ids) != set(current_ids):
+            return {"ok": False, "error": "Device id set mismatch"}
+
+        by_id = {device.id: device for device in self.devices}
+        self.devices = [by_id[device_id] for device_id in ordered_ids]
+        self._device_map = {device.id: device for device in self.devices}
+        self._write_config_file()
+        return {"ok": True, "order": ordered_ids}
 
     def _write_config_file(self):
         if not self._config_path:
@@ -181,7 +210,7 @@ class ShellyController:
             payload.append(
                 {
                     "id": device.id,
-                    "device_name": device.display_name,
+                    "device_name": device.device_name or device.display_name,
                     "display_name": device.display_name,
                     "other_names": device.other_names,
                     "room": device.room,

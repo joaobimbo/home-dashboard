@@ -9,6 +9,7 @@ const formEmpty = document.getElementById("device-form-empty");
 let configuredDevices = [];
 let activeRoom = "all";
 let selectedDeviceId = "";
+let draggedDeviceId = "";
 
 async function fetchConfiguredDevices() {
   const res = await fetch("/api/shelly/configured");
@@ -29,6 +30,22 @@ async function updateDeviceConfig(deviceId, payload) {
 
   if (!res.ok) {
     throw new Error("Failed to update device config");
+  }
+
+  return res.json();
+}
+
+async function saveDeviceOrder(orderedIds) {
+  const res = await fetch("/api/shelly/order", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ ordered_ids: orderedIds }),
+  });
+
+  if (!res.ok) {
+    throw new Error("Failed to save device order");
   }
 
   return res.json();
@@ -63,7 +80,7 @@ function renderDevices(devices) {
       const room = device.room || "Casa";
 
       return `
-      <button class="device-card is-off" data-device-id="${device.id}" data-room="${room}" type="button" data-action="toggle" title="Toggle ${device.name}">
+      <button class="device-card is-off" data-device-id="${device.id}" data-room="${room}" type="button" data-action="toggle" draggable="true" title="Toggle ${device.name}">
         ${image}
         <div class="device-meta">
           <h3>${device.name}</h3>
@@ -242,6 +259,67 @@ async function sendAction(deviceId, action) {
 }
 
 if (deviceList) {
+  deviceList.addEventListener("dragstart", (event) => {
+    const card = event.target.closest(".device-card[data-device-id]");
+    if (!card) {
+      return;
+    }
+    draggedDeviceId = card.dataset.deviceId;
+    card.classList.add("is-dragging");
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+    }
+  });
+
+  deviceList.addEventListener("dragend", (event) => {
+    const card = event.target.closest(".device-card[data-device-id]");
+    if (card) {
+      card.classList.remove("is-dragging");
+    }
+  });
+
+  deviceList.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    const targetCard = event.target.closest(".device-card[data-device-id]");
+    if (!targetCard || !draggedDeviceId || targetCard.dataset.deviceId === draggedDeviceId) {
+      return;
+    }
+
+    const draggedCard = deviceList.querySelector(`[data-device-id="${draggedDeviceId}"]`);
+    if (!draggedCard) {
+      return;
+    }
+
+    const rect = targetCard.getBoundingClientRect();
+    const isAfter = event.clientY > rect.top + rect.height / 2;
+    if (isAfter) {
+      targetCard.insertAdjacentElement("afterend", draggedCard);
+    } else {
+      targetCard.insertAdjacentElement("beforebegin", draggedCard);
+    }
+  });
+
+  deviceList.addEventListener("drop", async (event) => {
+    event.preventDefault();
+    draggedDeviceId = "";
+    const orderedIds = Array.from(
+      deviceList.querySelectorAll(".device-card[data-device-id]"),
+      (card) => card.dataset.deviceId,
+    );
+
+    try {
+      await saveDeviceOrder(orderedIds);
+      const byId = new Map(configuredDevices.map((device) => [device.id, device]));
+      configuredDevices = orderedIds.map((id) => byId.get(id)).filter(Boolean);
+    } catch (_err) {
+      configuredDevices = await fetchConfiguredDevices();
+      renderRoomFilter(configuredDevices);
+      renderDevices(configuredDevices);
+      applyRoomFilter();
+      await refreshAll();
+    }
+  });
+
   deviceList.addEventListener("click", async (event) => {
     const card = event.target.closest(".device-card[data-device-id]");
     if (!card) {

@@ -40,6 +40,15 @@ def shelly_update_config(device_id):
     return jsonify(result), status_code
 
 
+@app.route("/api/shelly/order", methods=["POST"])
+def shelly_reorder_devices():
+    payload = request.get_json(silent=True) or {}
+    ordered_ids = payload.get("ordered_ids", [])
+    result = controller.reorder_devices(ordered_ids)
+    status_code = 200 if result.get("ok") else 400
+    return jsonify(result), status_code
+
+
 @app.route("/api/shelly/<device_id>/action", methods=["POST"])
 def shelly_action(device_id):
     payload = request.get_json(silent=True) or {}
