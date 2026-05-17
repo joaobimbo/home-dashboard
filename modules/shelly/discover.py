@@ -11,6 +11,7 @@ from urllib import request
 
 
 def parse_args():
+    default_output = Path(__file__).resolve().parent / "devices.json"
     parser = argparse.ArgumentParser(
         description="Discover Shelly devices on LAN and write editable config"
     )
@@ -21,7 +22,7 @@ def parse_args():
     )
     parser.add_argument(
         "--output",
-        default="modules/shelly/devices.json",
+        default=str(default_output),
         help="Output JSON config path",
     )
     parser.add_argument(

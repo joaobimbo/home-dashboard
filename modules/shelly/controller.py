@@ -27,7 +27,9 @@ class ShellyController:
         self._device_map: Dict[str, ShellyDevice] = {d.id: d for d in devices}
 
     @classmethod
-    def from_sources(cls, config_path: str = "modules/shelly/devices.json"):
+    def from_sources(cls, config_path: str | None = None):
+        if config_path is None:
+            config_path = str(Path(__file__).resolve().parent / "devices.json")
         file_devices = cls._load_from_file(config_path)
         if file_devices:
             return cls(file_devices)
@@ -94,6 +96,20 @@ class ShellyController:
 
     def read_all(self):
         return [self.read_device(device.id) for device in self.devices]
+
+    def list_configured_devices(self):
+        return [
+            {
+                "id": device.id,
+                "name": device.name,
+                "display_name": device.display_name,
+                "host": device.host,
+                "relay": device.relay,
+                "image": device.image,
+                "other_names": device.other_names,
+            }
+            for device in self.devices
+        ]
 
     def read_device(self, device_id: str):
         device = self._device_map.get(device_id)

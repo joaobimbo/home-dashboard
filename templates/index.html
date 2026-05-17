@@ -10,49 +10,50 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <div class="app-shell">
-    <header class="hero">
-      <p class="tag">Local Home Dashboard</p>
-      <h1>Shelly Controls</h1>
-      <p class="subtitle">Single place to monitor and switch lights from any browser in your home.</p>
-    </header>
+  <div class="dashboard-shell">
+    <aside class="side-nav" aria-label="Primary">
+      <button class="nav-btn is-active" type="button">Casa</button>
+      <button class="nav-btn" type="button">Luzes</button>
+      <button class="nav-btn" type="button">Cenas</button>
+      <button class="nav-btn" type="button">Estado</button>
+    </aside>
 
-    <main class="layout">
-      <section class="panel" aria-labelledby="devices-title">
-        <div class="panel-head">
-          <h2 id="devices-title">Devices</h2>
-          <button id="refresh-all" class="ghost" type="button">Refresh</button>
+    <div class="app-shell">
+      <header class="hero">
+        <div>
+          <p class="tag">Local Home Dashboard</p>
+          <h1>Bom dia!</h1>
+          <p class="subtitle">Painel Shelly em tempo real para toda a casa.</p>
         </div>
-
-        <div class="device-list" id="device-list">
-          {% for device in devices %}
-          <article class="device-card" data-device-id="{{ device.id }}">
-            {% if device.image %}
-            <img class="device-image" src="{{ device.image }}" alt="{{ device.name }}">
-            {% endif %}
-            <div class="device-meta">
-              <h3>{{ device.name }}</h3>
-              <p class="state" data-state>Checking...</p>
-            </div>
-            <div class="actions">
-              <button class="switch" data-action="toggle" type="button">Toggle</button>
-              <button class="switch" data-action="on" type="button">On</button>
-              <button class="switch" data-action="off" type="button">Off</button>
-            </div>
-          </article>
-          {% endfor %}
+        <div class="hero-widgets">
+          <div class="widget weather">
+            <span class="weather-temp">22&deg;</span>
+            <span class="weather-label">Poucas nuvens</span>
+          </div>
+          <div class="widget clock" id="clock-widget">--:--</div>
         </div>
-      </section>
+      </header>
 
-      <section class="panel muted">
-        <h2>Next Modules</h2>
-        <ul>
-          <li>Music controls (planned)</li>
-          <li>Calendar panel (planned)</li>
-          <li>Photos panel (planned)</li>
-        </ul>
-      </section>
-    </main>
+      <main class="layout">
+        <section class="panel" aria-labelledby="devices-title">
+          <div class="panel-head">
+            <h2 id="devices-title">Dispositivos</h2>
+            <button id="refresh-all" class="ghost" type="button">Atualizar</button>
+          </div>
+
+          <div class="device-list" id="device-list"></div>
+        </section>
+
+        <section class="panel muted">
+          <h2>Ações rápidas</h2>
+          <div class="quick-actions">
+            <button class="switch" data-scene="off" type="button">Desligar tudo</button>
+            <button class="switch" data-scene="on" type="button">Ligar tudo</button>
+          </div>
+          <p class="note">As ações rápidas aplicam a todos os dispositivos visíveis no painel.</p>
+        </section>
+      </main>
+    </div>
   </div>
 
   <script src="{{ url_for('static', filename='app.js') }}"></script>

@@ -1,72 +1,41 @@
 # AGENTS.md — Home Dashboard
 
-## Project goal
+## Scope and constraints
 
-Build a lean local home dashboard for my house.
+- Current milestone is only the dashboard frame + Shelly controls; do not implement Spotify/calendar/photos/voice yet.
+- Keep stack minimal: Python + Flask + Jinja templates + plain HTML/CSS + small vanilla JS.
+- Do not introduce Node/npm/frontend frameworks, Docker, or a database unless explicitly requested.
 
-The dashboard must be accessible from any browser, iPad, or phone on the local network. It should be simple, robust, and easy to maintain.
+## Entrypoints and runtime
 
-The first milestone is a working dashboard frame with buttons for controlling Shelly devices.
+- Start server with `python app.py`.
+- Flask binds `0.0.0.0:5000` in `app.py`, so it should work on LAN at `http://<host-ip>:5000`.
+- Main wiring is in `app.py`: page route `/`, health `/api/status`, Shelly APIs under `/api/shelly/*`.
 
-Do not build Spotify, calendar, photos, voice control, or other integrations yet. Leave the architecture ready for them, but focus only on the frame and Shelly controls.
+## Shelly architecture (important)
 
----
+- Shelly code is centralized in `modules/shelly/`.
+- Browser never calls Shelly devices directly; all control/status goes through Flask endpoints.
+- Device list source order in `ShellyController.from_sources()`:
+  1) `modules/shelly/devices.json`
+  2) `SHELLY_DEVICES_JSON` env var
+  3) hardcoded fallback sample devices
 
-## Core principles
+## Discovery workflow
 
-Use the simplest stack that works:
+- Discovery is manual/on-demand via `python modules/shelly/discover.py`; it is not part of server startup.
+- Default discovery scan is CIDR `192.168.1.0/24`; override with `--network`.
+- Discovery writes editable JSON to `modules/shelly/devices.json` (default) and merges manual fields unless `--no-merge`.
+- Supported naming fields in registry: `device_name` (discovered), `display_name` (UI/manual), `other_names` (aliases).
 
-- Python 3
-- Flask
-- Jinja2 templates
-- Plain HTML
-- Plain CSS
-- Small plain JavaScript only where needed
+## File-level map
 
-Avoid:
+- `app.py`: Flask app + API routes.
+- `modules/shelly/controller.py`: config loading, device status reads, on/off/toggle actions.
+- `modules/shelly/discover.py`: LAN scan + config generation/merge.
+- `templates/index.html`, `static/app.js`, `static/style.css`: dashboard UI.
 
-- Node.js
-- npm
-- React
-- Vue
-- Svelte
-- Angular
-- TypeScript
-- Tailwind
-- Vite
-- Webpack
-- Docker
-- Databases, unless explicitly requested
+## Verified dev checks
 
-The app should run with:
-
-```bash
-python app.py
-```
-
-and be reachable at:
-
-http://localhost:5000
-
-or from other devices on the LAN:
-
-http://<desktop-ip>:5000
-
-Browser / iPad / phone
-    ↓
-HTML + CSS + small JavaScript
-    ↓
-Flask server
-    ↓
-Python modules for device integrations
-
-
-The browser must never talk directly to device APIs if the server can do it cleanly.
-
-### Flask should:
-
-- serve the dashboard
-- render templates
-- expose small JSON API endpoints
-- call Shelly devices
-- keep configuration and secrets away from the browser
+- No repo test/lint/typecheck config is present right now; use focused smoke checks.
+- Useful quick check: `python -m py_compile app.py modules/shelly/controller.py modules/shelly/discover.py`.
