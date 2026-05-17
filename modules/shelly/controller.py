@@ -13,6 +13,7 @@ class ShellyDevice:
     host: str
     relay: int = 0
     image: str = ""
+    room: str = "Casa"
     other_names: List[str] = field(default_factory=list)
 
     @property
@@ -62,6 +63,7 @@ class ShellyController:
                     host=item["host"],
                     relay=int(item.get("relay", 0)),
                     image=str(item.get("image", "")),
+                    room=str(item.get("room", "Casa")),
                     other_names=list(item.get("other_names", [])),
                 )
                 for item in parsed
@@ -85,6 +87,7 @@ class ShellyController:
                         host=item["host"],
                         relay=int(item.get("relay", 0)),
                         image=str(item.get("image", "")),
+                        room=str(item.get("room", "Casa")),
                         other_names=list(item.get("other_names", [])),
                     )
                     for item in parsed
@@ -106,6 +109,7 @@ class ShellyController:
                 "host": device.host,
                 "relay": device.relay,
                 "image": device.image,
+                "room": device.room,
                 "other_names": device.other_names,
             }
             for device in self.devices

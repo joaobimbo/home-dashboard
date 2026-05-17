@@ -1,6 +1,11 @@
 const deviceList = document.getElementById("device-list");
 const refreshButton = document.getElementById("refresh-all");
 const clockWidget = document.getElementById("clock-widget");
+const roomFilter = document.getElementById("room-filter");
+const statusOverview = document.getElementById("status-overview");
+
+let configuredDevices = [];
+let activeRoom = "all";
 
 async function fetchConfiguredDevices() {
   const res = await fetch("/api/shelly/configured");
@@ -36,9 +41,10 @@ function renderDevices(devices) {
       const aliases = Array.isArray(device.other_names) && device.other_names.length
         ? `<p class="aliases">${device.other_names.join(" / ")}</p>`
         : "";
+      const room = device.room || "Casa";
 
       return `
-      <button class="device-card is-off" data-device-id="${device.id}" type="button" data-action="toggle" title="Toggle ${device.name}">
+      <button class="device-card is-off" data-device-id="${device.id}" data-room="${room}" type="button" data-action="toggle" title="Toggle ${device.name}">
         ${image}
         <div class="device-meta">
           <h3>${device.name}</h3>
@@ -51,6 +57,47 @@ function renderDevices(devices) {
     .join("");
 }
 
+function renderRoomFilter(devices) {
+  if (!roomFilter) {
+    return;
+  }
+
+  const rooms = [...new Set(devices.map((device) => device.room || "Casa"))].sort();
+  roomFilter.innerHTML = ["all", ...rooms]
+    .map((room) => {
+      const label = room === "all" ? "Todas" : room;
+      const isActive = room === activeRoom ? "is-active" : "";
+      return `<button class="chip ${isActive}" type="button" data-room="${room}">${label}</button>`;
+    })
+    .join("");
+}
+
+function applyRoomFilter() {
+  document.querySelectorAll(".device-card[data-device-id]").forEach((card) => {
+    const shouldShow = activeRoom === "all" || card.getAttribute("data-room") === activeRoom;
+    card.hidden = !shouldShow;
+  });
+}
+
+function repaintOverview() {
+  if (!statusOverview) {
+    return;
+  }
+
+  const cards = Array.from(document.querySelectorAll(".device-card[data-device-id]")).filter(
+    (card) => !card.hidden,
+  );
+  const totals = {
+    total: cards.length,
+    on: cards.filter((card) => card.classList.contains("is-on")).length,
+    offline: cards.filter((card) => card.classList.contains("is-error")).length,
+  };
+
+  statusOverview.querySelector("[data-total]").textContent = String(totals.total);
+  statusOverview.querySelector("[data-on]").textContent = String(totals.on);
+  statusOverview.querySelector("[data-offline]").textContent = String(totals.offline);
+}
+
 function paintCard(card, info) {
   const stateNode = card.querySelector("[data-state]");
   card.classList.remove("is-on", "is-off", "is-error", "is-busy");
@@ -60,6 +107,7 @@ function paintCard(card, info) {
     stateNode.textContent = "Offline";
     card.classList.add("is-error");
     stateNode.classList.add("is-error");
+    repaintOverview();
     return;
   }
 
@@ -67,12 +115,14 @@ function paintCard(card, info) {
     stateNode.textContent = "On";
     card.classList.add("is-on");
     stateNode.classList.add("is-on");
+    repaintOverview();
     return;
   }
 
   stateNode.textContent = "Off";
   card.classList.add("is-off");
   stateNode.classList.add("is-off");
+  repaintOverview();
 }
 
 async function refreshAll() {
@@ -90,7 +140,9 @@ async function refreshAll() {
 }
 
 async function runScene(action) {
-  const cards = Array.from(document.querySelectorAll(".device-card[data-device-id]"));
+  const cards = Array.from(document.querySelectorAll(".device-card[data-device-id]")).filter(
+    (card) => !card.hidden,
+  );
   await Promise.all(
     cards.map(async (card) => {
       const deviceId = card.dataset.deviceId;
@@ -119,7 +171,10 @@ function tickClock() {
 async function bootstrapDashboard() {
   try {
     const devices = await fetchConfiguredDevices();
-    renderDevices(devices);
+    configuredDevices = devices;
+    renderRoomFilter(configuredDevices);
+    renderDevices(configuredDevices);
+    applyRoomFilter();
   } catch (_err) {
     if (deviceList) {
       deviceList.innerHTML = '<p class="empty-devices">Failed to load device list.</p>';
@@ -176,6 +231,20 @@ if (deviceList) {
 
 if (refreshButton) {
   refreshButton.addEventListener("click", refreshAll);
+}
+
+if (roomFilter) {
+  roomFilter.addEventListener("click", (event) => {
+    const chip = event.target.closest("[data-room]");
+    if (!chip) {
+      return;
+    }
+
+    activeRoom = chip.getAttribute("data-room") || "all";
+    renderRoomFilter(configuredDevices);
+    applyRoomFilter();
+    repaintOverview();
+  });
 }
 
 document.querySelectorAll("[data-scene]").forEach((button) => {

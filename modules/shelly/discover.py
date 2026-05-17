@@ -88,6 +88,7 @@ def probe_host(host: str, timeout: float) -> Optional[Dict[str, object]]:
         "device_name": device_name,
         "display_name": device_name,
         "other_names": [],
+        "room": "Casa",
         "host": host,
         "relay": 0,
         "image": "",
@@ -138,6 +139,8 @@ def merge_manual_fields(
             device["id"] = slugify(current["name"])
         if isinstance(current.get("other_names"), list):
             device["other_names"] = [str(name) for name in current["other_names"]]
+        if current.get("room"):
+            device["room"] = str(current["room"])
         if current.get("image"):
             device["image"] = current["image"]
         if current.get("relay") is not None:

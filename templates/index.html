@@ -41,11 +41,18 @@
             <button id="refresh-all" class="ghost" type="button">Atualizar</button>
           </div>
 
+          <div class="room-filter" id="room-filter"></div>
+
           <div class="device-list" id="device-list"></div>
         </section>
 
         <section class="panel muted">
           <h2>Ações rápidas</h2>
+          <div class="status-overview" id="status-overview">
+            <p>Total: <strong data-total>0</strong></p>
+            <p>Ligados: <strong data-on>0</strong></p>
+            <p>Offline: <strong data-offline>0</strong></p>
+          </div>
           <div class="quick-actions">
             <button class="switch" data-scene="off" type="button">Desligar tudo</button>
             <button class="switch" data-scene="on" type="button">Ligar tudo</button>

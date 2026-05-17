@@ -166,6 +166,28 @@ h2 {
   gap: 0.7rem;
 }
 
+.room-filter {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  margin: 0 0 0.8rem;
+}
+
+.chip {
+  border: 1px solid rgba(174, 203, 236, 0.26);
+  border-radius: 999px;
+  background: rgba(23, 40, 61, 0.72);
+  color: var(--text-soft);
+  padding: 0.28rem 0.7rem;
+  font-size: 0.78rem;
+}
+
+.chip.is-active {
+  color: var(--text-main);
+  border-color: rgba(118, 175, 247, 0.62);
+  background: rgba(45, 83, 139, 0.76);
+}
+
 .device-card {
   display: flex;
   flex-direction: column;
@@ -292,6 +314,23 @@ button:hover {
   display: grid;
   gap: 0.55rem;
   margin-top: 0.8rem;
+}
+
+.status-overview {
+  margin-top: 0.7rem;
+  padding: 0.7rem;
+  border: 1px solid rgba(171, 200, 234, 0.2);
+  border-radius: 12px;
+  background: rgba(18, 34, 54, 0.66);
+}
+
+.status-overview p {
+  margin: 0.2rem 0;
+  color: var(--text-soft);
+}
+
+.status-overview strong {
+  color: var(--text-main);
 }
 
 .quick-actions .switch {
