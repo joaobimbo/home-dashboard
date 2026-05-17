@@ -1,9 +1,10 @@
 from flask import Flask, jsonify, render_template, request
 
-from modules.shelly import ShellyController
+from modules.shelly import SceneStore, ShellyController
 
 app = Flask(__name__)
 controller = ShellyController.from_sources()
+scene_store = SceneStore()
 
 
 @app.route("/")
@@ -46,6 +47,42 @@ def shelly_reorder_devices():
     ordered_ids = payload.get("ordered_ids", [])
     result = controller.reorder_devices(ordered_ids)
     status_code = 200 if result.get("ok") else 400
+    return jsonify(result), status_code
+
+
+@app.route("/api/scenes")
+def list_scenes():
+    return jsonify(scene_store.list_scenes())
+
+
+@app.route("/api/scenes", methods=["POST"])
+def create_scene():
+    payload = request.get_json(silent=True) or {}
+    result = scene_store.create_scene(
+        str(payload.get("name", "")),
+        str(payload.get("action", "toggle")),
+        str(payload.get("room", "all")),
+    )
+    status_code = 200 if result.get("ok") else 400
+    return jsonify(result), status_code
+
+
+@app.route("/api/scenes/<scene_id>/run", methods=["POST"])
+def run_scene(scene_id):
+    scene = scene_store.get_scene(scene_id)
+    if not scene:
+        return jsonify({"ok": False, "error": "Scene not found"}), 404
+
+    result = controller.apply_action_to_devices(
+        scene["action"], scene.get("room", "all")
+    )
+    return jsonify(result), 200
+
+
+@app.route("/api/scenes/<scene_id>", methods=["DELETE"])
+def delete_scene(scene_id):
+    result = scene_store.delete_scene(scene_id)
+    status_code = 200 if result.get("ok") else 404
     return jsonify(result), status_code
 
 

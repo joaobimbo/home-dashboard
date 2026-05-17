@@ -277,6 +277,27 @@ class ShellyController:
                 "error": str(exc),
             }
 
+    def apply_action_to_devices(self, action: str, room: str | None = None):
+        if action not in {"on", "off", "toggle"}:
+            return {"ok": False, "error": "Invalid action"}
+
+        if room and room != "all":
+            targets = [device for device in self.devices if device.room == room]
+        else:
+            targets = list(self.devices)
+
+        results = [self.apply_action(device.id, action) for device in targets]
+        success = sum(1 for item in results if item.get("ok"))
+        return {
+            "ok": True,
+            "action": action,
+            "room": room or "all",
+            "total": len(results),
+            "success": success,
+            "failed": len(results) - success,
+            "results": results,
+        }
+
     def _request_json(self, device: ShellyDevice, endpoint: str):
         encoded_endpoint = parse.quote(endpoint, safe="/?=&")
         url = f"http://{device.host}{encoded_endpoint}"

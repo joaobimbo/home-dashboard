@@ -61,6 +61,29 @@
           <p class="note">As ações rápidas aplicam a todos os dispositivos visíveis no painel.</p>
 
           <hr class="divider">
+          <h2>Cenas</h2>
+          <form id="scene-form" class="device-form">
+            <label>
+              Nome da cena
+              <input id="scene-name" type="text" maxlength="64" placeholder="Noite, Saída...">
+            </label>
+            <label>
+              Ação
+              <select id="scene-action">
+                <option value="off">Desligar</option>
+                <option value="on">Ligar</option>
+                <option value="toggle">Toggle</option>
+              </select>
+            </label>
+            <label>
+              Divisão
+              <input id="scene-room" type="text" maxlength="64" placeholder="all ou Sala">
+            </label>
+            <button class="switch" type="submit">Guardar cena</button>
+          </form>
+          <div class="scene-list" id="scene-list"></div>
+
+          <hr class="divider">
           <h2>Editar dispositivo</h2>
           <form id="device-form" class="device-form">
             <p class="note" id="device-form-empty">Toque num dispositivo para editar.</p>
