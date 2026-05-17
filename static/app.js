@@ -12,6 +12,8 @@ let configuredDevices = Array.isArray(window.__CONFIGURED_DEVICES__)
   ? window.__CONFIGURED_DEVICES__
   : [];
 let activeRoom = "all";
+let statusTimer = null;
+let refreshInFlight = false;
 
 async function fetchStatus() {
   const res = await fetch("/api/shelly/devices");
@@ -166,6 +168,10 @@ function renderScenes(scenes) {
 }
 
 async function refreshAll() {
+  if (refreshInFlight) {
+    return;
+  }
+  refreshInFlight = true;
   try {
     const statuses = await fetchStatus();
     const statusMap = new Map(statuses.map((entry) => [entry.id, entry]));
@@ -176,7 +182,25 @@ async function refreshAll() {
     document.querySelectorAll(".device-card[data-device-id]").forEach((card) => {
       paintCard(card, null);
     });
+  } finally {
+    refreshInFlight = false;
   }
+}
+
+function startStatusPolling() {
+  if (statusTimer) {
+    clearInterval(statusTimer);
+  }
+
+  statusTimer = setInterval(() => {
+    if (document.hidden) {
+      return;
+    }
+    if (!document.querySelector(".device-card[data-device-id]")) {
+      return;
+    }
+    refreshAll();
+  }, 5000);
 }
 
 async function runScene(action) {
@@ -319,6 +343,12 @@ if (sceneList) {
   });
 }
 
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    refreshAll();
+  }
+});
+
 async function bootstrap() {
   applyRoomFilter();
   await refreshAll();
@@ -330,6 +360,8 @@ async function bootstrap() {
       sceneList.innerHTML = '<p class="note">Falha ao carregar cenas.</p>';
     }
   }
+
+  startStatusPolling();
 }
 
 tickClock();

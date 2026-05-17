@@ -1,5 +1,6 @@
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List
@@ -117,7 +118,24 @@ class ShellyController:
         return []
 
     def read_all(self):
-        return [self.read_device(device.id) for device in self.devices]
+        if not self.devices:
+            return []
+
+        results: List[Dict[str, object]] = []
+        workers = min(16, max(1, len(self.devices)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(self.read_device, device.id): index
+                for index, device in enumerate(self.devices)
+            }
+            ordered: Dict[int, Dict[str, object]] = {}
+            for future in as_completed(futures):
+                index = futures[future]
+                ordered[index] = future.result()
+
+        for index in sorted(ordered.keys()):
+            results.append(ordered[index])
+        return results
 
     def list_configured_devices(self):
         return [
