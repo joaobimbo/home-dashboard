@@ -186,20 +186,6 @@ class ShellyController:
             "other_names": device.other_names,
         }
 
-    def reorder_devices(self, ordered_ids: List[str]):
-        if not ordered_ids:
-            return {"ok": False, "error": "No device ids provided"}
-
-        current_ids = [device.id for device in self.devices]
-        if set(ordered_ids) != set(current_ids):
-            return {"ok": False, "error": "Device id set mismatch"}
-
-        by_id = {device.id: device for device in self.devices}
-        self.devices = [by_id[device_id] for device_id in ordered_ids]
-        self._device_map = {device.id: device for device in self.devices}
-        self._write_config_file()
-        return {"ok": True, "order": ordered_ids}
-
     def _write_config_file(self):
         if not self._config_path:
             return

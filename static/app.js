@@ -8,15 +8,27 @@ const formEmpty = document.getElementById("device-form-empty");
 const sceneForm = document.getElementById("scene-form");
 const sceneList = document.getElementById("scene-list");
 
-let configuredDevices = [];
+let configuredDevices = Array.isArray(window.__CONFIGURED_DEVICES__)
+  ? window.__CONFIGURED_DEVICES__
+  : [];
 let activeRoom = "all";
-let selectedDeviceId = "";
-let draggedDeviceId = "";
 
-async function fetchConfiguredDevices() {
-  const res = await fetch("/api/shelly/configured");
+async function fetchStatus() {
+  const res = await fetch("/api/shelly/devices");
   if (!res.ok) {
-    throw new Error("Failed to fetch devices");
+    throw new Error("Failed to fetch status");
+  }
+  return res.json();
+}
+
+async function sendAction(deviceId, action) {
+  const res = await fetch(`/api/shelly/${deviceId}/action`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action }),
+  });
+  if (!res.ok) {
+    throw new Error("Action failed");
   }
   return res.json();
 }
@@ -24,32 +36,12 @@ async function fetchConfiguredDevices() {
 async function updateDeviceConfig(deviceId, payload) {
   const res = await fetch(`/api/shelly/${deviceId}/config`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-
   if (!res.ok) {
     throw new Error("Failed to update device config");
   }
-
-  return res.json();
-}
-
-async function saveDeviceOrder(orderedIds) {
-  const res = await fetch("/api/shelly/order", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ ordered_ids: orderedIds }),
-  });
-
-  if (!res.ok) {
-    throw new Error("Failed to save device order");
-  }
-
   return res.json();
 }
 
@@ -64,9 +56,7 @@ async function fetchScenes() {
 async function createScene(payload) {
   const res = await fetch("/api/scenes", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
@@ -76,9 +66,7 @@ async function createScene(payload) {
 }
 
 async function runSavedScene(sceneId) {
-  const res = await fetch(`/api/scenes/${sceneId}/run`, {
-    method: "POST",
-  });
+  const res = await fetch(`/api/scenes/${sceneId}/run`, { method: "POST" });
   if (!res.ok) {
     throw new Error("Failed to run scene");
   }
@@ -86,76 +74,17 @@ async function runSavedScene(sceneId) {
 }
 
 async function deleteSavedScene(sceneId) {
-  const res = await fetch(`/api/scenes/${sceneId}`, {
-    method: "DELETE",
-  });
+  const res = await fetch(`/api/scenes/${sceneId}`, { method: "DELETE" });
   if (!res.ok) {
     throw new Error("Failed to delete scene");
   }
   return res.json();
 }
 
-async function fetchStatus() {
-  const res = await fetch("/api/shelly/devices");
-  if (!res.ok) {
-    throw new Error("Failed to fetch status");
-  }
-  return res.json();
-}
-
-function renderDevices(devices) {
-  if (!deviceList) {
-    return;
-  }
-
-  if (!devices.length) {
-    deviceList.innerHTML = '<p class="empty-devices">No devices configured yet.</p>';
-    return;
-  }
-
-  deviceList.innerHTML = devices
-    .map((device) => {
-      const image = device.image
-        ? `<img class="device-image" src="${device.image}" alt="${device.name}">`
-        : '<div class="device-image fallback-icon" aria-hidden="true">💡</div>';
-      const aliases = Array.isArray(device.other_names) && device.other_names.length
-        ? `<p class="aliases">${device.other_names.join(" / ")}</p>`
-        : "";
-      const room = device.room || "Casa";
-
-      return `
-      <button class="device-card is-off" data-device-id="${device.id}" data-room="${room}" type="button" data-action="toggle" draggable="true" title="Toggle ${device.name}">
-        ${image}
-        <div class="device-meta">
-          <h3>${device.name}</h3>
-          <p class="host">${device.host}</p>
-          ${aliases}
-          <p class="state" data-state>Checking...</p>
-        </div>
-      </button>`;
-    })
-    .join("");
-}
-
-function renderRoomFilter(devices) {
-  if (!roomFilter) {
-    return;
-  }
-
-  const rooms = [...new Set(devices.map((device) => device.room || "Casa"))].sort();
-  roomFilter.innerHTML = ["all", ...rooms]
-    .map((room) => {
-      const label = room === "all" ? "Todas" : room;
-      const isActive = room === activeRoom ? "is-active" : "";
-      return `<button class="chip ${isActive}" type="button" data-room="${room}">${label}</button>`;
-    })
-    .join("");
-}
-
 function applyRoomFilter() {
   document.querySelectorAll(".device-card[data-device-id]").forEach((card) => {
-    const shouldShow = activeRoom === "all" || card.getAttribute("data-room") === activeRoom;
-    card.hidden = !shouldShow;
+    const visible = activeRoom === "all" || card.dataset.room === activeRoom;
+    card.hidden = !visible;
   });
 }
 
@@ -163,65 +92,14 @@ function repaintOverview() {
   if (!statusOverview) {
     return;
   }
-
   const cards = Array.from(document.querySelectorAll(".device-card[data-device-id]")).filter(
     (card) => !card.hidden,
   );
-  const totals = {
-    total: cards.length,
-    on: cards.filter((card) => card.classList.contains("is-on")).length,
-    offline: cards.filter((card) => card.classList.contains("is-error")).length,
-  };
-
-  statusOverview.querySelector("[data-total]").textContent = String(totals.total);
-  statusOverview.querySelector("[data-on]").textContent = String(totals.on);
-  statusOverview.querySelector("[data-offline]").textContent = String(totals.offline);
-}
-
-function renderScenes(scenes) {
-  if (!sceneList) {
-    return;
-  }
-
-  if (!scenes.length) {
-    sceneList.innerHTML = '<p class="note">Sem cenas guardadas.</p>';
-    return;
-  }
-
-  sceneList.innerHTML = scenes
-    .map(
-      (scene) => `
-      <div class="scene-item" data-scene-id="${scene.id}">
-        <div>
-          <strong>${scene.name}</strong><br>
-          <small>${scene.action.toUpperCase()} · ${scene.room}</small>
-        </div>
-        <button type="button" data-run-scene="${scene.id}">Executar</button>
-        <button type="button" data-delete-scene="${scene.id}">Apagar</button>
-      </div>`,
-    )
-    .join("");
-}
-
-function pickDevice(deviceId) {
-  selectedDeviceId = deviceId;
-  document.querySelectorAll(".device-card").forEach((card) => {
-    card.classList.toggle("is-selected", card.dataset.deviceId === deviceId);
-  });
-
-  const device = configuredDevices.find((item) => item.id === deviceId);
-  if (!device || !deviceForm) {
-    return;
-  }
-
-  if (formEmpty) {
-    formEmpty.hidden = true;
-  }
-  document.getElementById("form-device-id").value = device.id;
-  document.getElementById("form-display-name").value = device.display_name || device.name;
-  document.getElementById("form-room").value = device.room || "Casa";
-  document.getElementById("form-other-names").value = (device.other_names || []).join(", ");
-  document.getElementById("form-image").value = device.image || "";
+  const onCount = cards.filter((card) => card.classList.contains("is-on")).length;
+  const offlineCount = cards.filter((card) => card.classList.contains("is-error")).length;
+  statusOverview.querySelector("[data-total]").textContent = String(cards.length);
+  statusOverview.querySelector("[data-on]").textContent = String(onCount);
+  statusOverview.querySelector("[data-offline]").textContent = String(offlineCount);
 }
 
 function paintCard(card, info) {
@@ -241,25 +119,61 @@ function paintCard(card, info) {
     stateNode.textContent = "On";
     card.classList.add("is-on");
     stateNode.classList.add("is-on");
-    repaintOverview();
+  } else {
+    stateNode.textContent = "Off";
+    card.classList.add("is-off");
+    stateNode.classList.add("is-off");
+  }
+  repaintOverview();
+}
+
+function pickDevice(deviceId) {
+  document.querySelectorAll(".device-card").forEach((card) => {
+    card.classList.toggle("is-selected", card.dataset.deviceId === deviceId);
+  });
+  const device = configuredDevices.find((item) => item.id === deviceId);
+  if (!device || !deviceForm) {
     return;
   }
+  if (formEmpty) {
+    formEmpty.hidden = true;
+  }
+  document.getElementById("form-device-id").value = device.id;
+  document.getElementById("form-display-name").value = device.display_name || device.name;
+  document.getElementById("form-room").value = device.room || "Casa";
+  document.getElementById("form-other-names").value = (device.other_names || []).join(", ");
+  document.getElementById("form-image").value = device.image || "";
+}
 
-  stateNode.textContent = "Off";
-  card.classList.add("is-off");
-  stateNode.classList.add("is-off");
-  repaintOverview();
+function renderScenes(scenes) {
+  if (!sceneList) {
+    return;
+  }
+  if (!scenes.length) {
+    sceneList.innerHTML = '<p class="note">Sem cenas guardadas.</p>';
+    return;
+  }
+  sceneList.innerHTML = scenes
+    .map(
+      (scene) => `
+      <div class="scene-item" data-scene-id="${scene.id}">
+        <div><strong>${scene.name}</strong><br><small>${scene.action.toUpperCase()} · ${scene.room}</small></div>
+        <button type="button" data-run-scene="${scene.id}">Executar</button>
+        <button type="button" data-delete-scene="${scene.id}">Apagar</button>
+      </div>`,
+    )
+    .join("");
 }
 
 async function refreshAll() {
   try {
     const statuses = await fetchStatus();
     const statusMap = new Map(statuses.map((entry) => [entry.id, entry]));
-    document.querySelectorAll(".device-card").forEach((card) => {
+    document.querySelectorAll(".device-card[data-device-id]").forEach((card) => {
       paintCard(card, statusMap.get(card.dataset.deviceId));
     });
   } catch (_err) {
-    document.querySelectorAll(".device-card").forEach((card) => {
+    document.querySelectorAll(".device-card[data-device-id]").forEach((card) => {
       paintCard(card, null);
     });
   }
@@ -271,9 +185,8 @@ async function runScene(action) {
   );
   await Promise.all(
     cards.map(async (card) => {
-      const deviceId = card.dataset.deviceId;
       try {
-        const result = await sendAction(deviceId, action);
+        const result = await sendAction(card.dataset.deviceId, action);
         paintCard(card, result);
       } catch (_err) {
         paintCard(card, null);
@@ -286,7 +199,6 @@ function tickClock() {
   if (!clockWidget) {
     return;
   }
-
   const now = new Date();
   clockWidget.textContent = now.toLocaleTimeString("pt-PT", {
     hour: "2-digit",
@@ -294,129 +206,18 @@ function tickClock() {
   });
 }
 
-async function bootstrapDashboard() {
-  try {
-    const devices = await fetchConfiguredDevices();
-    configuredDevices = devices;
-    renderRoomFilter(configuredDevices);
-    renderDevices(configuredDevices);
-    applyRoomFilter();
-  } catch (_err) {
-    if (deviceList) {
-      deviceList.innerHTML = '<p class="empty-devices">Failed to load device list.</p>';
-    }
-    return;
-  }
-
-  await refreshAll();
-
-  try {
-    const scenes = await fetchScenes();
-    renderScenes(scenes);
-  } catch (_err) {
-    if (sceneList) {
-      sceneList.innerHTML = '<p class="note">Falha ao carregar cenas.</p>';
-    }
-  }
-}
-
-async function sendAction(deviceId, action) {
-  const res = await fetch(`/api/shelly/${deviceId}/action`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ action }),
-  });
-
-  if (!res.ok) {
-    throw new Error("Action failed");
-  }
-
-  return res.json();
-}
-
 if (deviceList) {
-  deviceList.addEventListener("dragstart", (event) => {
-    const card = event.target.closest(".device-card[data-device-id]");
-    if (!card) {
-      return;
-    }
-    draggedDeviceId = card.dataset.deviceId;
-    card.classList.add("is-dragging");
-    if (event.dataTransfer) {
-      event.dataTransfer.effectAllowed = "move";
-    }
-  });
-
-  deviceList.addEventListener("dragend", (event) => {
-    const card = event.target.closest(".device-card[data-device-id]");
-    if (card) {
-      card.classList.remove("is-dragging");
-    }
-  });
-
-  deviceList.addEventListener("dragover", (event) => {
-    event.preventDefault();
-    const targetCard = event.target.closest(".device-card[data-device-id]");
-    if (!targetCard || !draggedDeviceId || targetCard.dataset.deviceId === draggedDeviceId) {
-      return;
-    }
-
-    const draggedCard = deviceList.querySelector(`[data-device-id="${draggedDeviceId}"]`);
-    if (!draggedCard) {
-      return;
-    }
-
-    const rect = targetCard.getBoundingClientRect();
-    const isAfter = event.clientY > rect.top + rect.height / 2;
-    if (isAfter) {
-      targetCard.insertAdjacentElement("afterend", draggedCard);
-    } else {
-      targetCard.insertAdjacentElement("beforebegin", draggedCard);
-    }
-  });
-
-  deviceList.addEventListener("drop", async (event) => {
-    event.preventDefault();
-    draggedDeviceId = "";
-    const orderedIds = Array.from(
-      deviceList.querySelectorAll(".device-card[data-device-id]"),
-      (card) => card.dataset.deviceId,
-    );
-
-    try {
-      await saveDeviceOrder(orderedIds);
-      const byId = new Map(configuredDevices.map((device) => [device.id, device]));
-      configuredDevices = orderedIds.map((id) => byId.get(id)).filter(Boolean);
-    } catch (_err) {
-      configuredDevices = await fetchConfiguredDevices();
-      renderRoomFilter(configuredDevices);
-      renderDevices(configuredDevices);
-      applyRoomFilter();
-      await refreshAll();
-    }
-  });
-
   deviceList.addEventListener("click", async (event) => {
     const card = event.target.closest(".device-card[data-device-id]");
-    if (!card) {
-      return;
-    }
-
-    if (card.disabled) {
+    if (!card || card.disabled) {
       return;
     }
 
     pickDevice(card.dataset.deviceId);
-
-    const deviceId = card.dataset.deviceId;
-    const action = card.dataset.action || "toggle";
     card.disabled = true;
     card.classList.add("is-busy");
-
     try {
-      const result = await sendAction(deviceId, action);
+      const result = await sendAction(card.dataset.deviceId, card.dataset.action || "toggle");
       paintCard(card, result);
     } catch (_err) {
       paintCard(card, null);
@@ -427,23 +228,39 @@ if (deviceList) {
   });
 }
 
-if (refreshButton) {
-  refreshButton.addEventListener("click", refreshAll);
-}
-
 if (roomFilter) {
   roomFilter.addEventListener("click", (event) => {
     const chip = event.target.closest("[data-room]");
     if (!chip) {
       return;
     }
-
-    activeRoom = chip.getAttribute("data-room") || "all";
-    renderRoomFilter(configuredDevices);
+    activeRoom = chip.dataset.room || "all";
+    roomFilter.querySelectorAll(".chip").forEach((node) => {
+      node.classList.toggle("is-active", node.dataset.room === activeRoom);
+    });
     applyRoomFilter();
     repaintOverview();
   });
 }
+
+if (refreshButton) {
+  refreshButton.addEventListener("click", refreshAll);
+}
+
+document.querySelectorAll("[data-scene]").forEach((button) => {
+  button.addEventListener("click", async () => {
+    const action = button.getAttribute("data-scene");
+    if (action !== "on" && action !== "off") {
+      return;
+    }
+    button.disabled = true;
+    try {
+      await runScene(action);
+    } finally {
+      button.disabled = false;
+    }
+  });
+});
 
 if (deviceForm) {
   deviceForm.addEventListener("submit", async (event) => {
@@ -452,24 +269,17 @@ if (deviceForm) {
     if (!deviceId) {
       return;
     }
-
     const payload = {
       display_name: document.getElementById("form-display-name").value,
       room: document.getElementById("form-room").value,
       other_names: document.getElementById("form-other-names").value,
       image: document.getElementById("form-image").value,
     };
-
     const saveButton = document.getElementById("save-device");
     saveButton.disabled = true;
     try {
       await updateDeviceConfig(deviceId, payload);
-      configuredDevices = await fetchConfiguredDevices();
-      renderRoomFilter(configuredDevices);
-      renderDevices(configuredDevices);
-      applyRoomFilter();
-      await refreshAll();
-      pickDevice(deviceId);
+      window.location.reload();
     } finally {
       saveButton.disabled = false;
     }
@@ -485,7 +295,6 @@ if (sceneForm) {
     if (!name) {
       return;
     }
-
     await createScene({ name, action, room });
     const scenes = await fetchScenes();
     renderScenes(scenes);
@@ -497,37 +306,32 @@ if (sceneList) {
   sceneList.addEventListener("click", async (event) => {
     const runButton = event.target.closest("[data-run-scene]");
     if (runButton) {
-      await runSavedScene(runButton.getAttribute("data-run-scene"));
+      await runSavedScene(runButton.dataset.runScene);
       await refreshAll();
       return;
     }
-
     const deleteButton = event.target.closest("[data-delete-scene]");
     if (deleteButton) {
-      await deleteSavedScene(deleteButton.getAttribute("data-delete-scene"));
+      await deleteSavedScene(deleteButton.dataset.deleteScene);
       const scenes = await fetchScenes();
       renderScenes(scenes);
     }
   });
 }
 
-document.querySelectorAll("[data-scene]").forEach((button) => {
-  button.addEventListener("click", async () => {
-    const action = button.getAttribute("data-scene");
-    if (action !== "on" && action !== "off") {
-      return;
+async function bootstrap() {
+  applyRoomFilter();
+  await refreshAll();
+  try {
+    const scenes = await fetchScenes();
+    renderScenes(scenes);
+  } catch (_err) {
+    if (sceneList) {
+      sceneList.innerHTML = '<p class="note">Falha ao carregar cenas.</p>';
     }
-
-    button.disabled = true;
-    try {
-      await runScene(action);
-    } finally {
-      button.disabled = false;
-    }
-  });
-});
+  }
+}
 
 tickClock();
 setInterval(tickClock, 1000);
-
-bootstrapDashboard();
+bootstrap();

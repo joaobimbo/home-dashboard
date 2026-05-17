@@ -310,11 +310,6 @@ button:hover {
   box-shadow: inset 0 0 0 1px rgba(124, 182, 245, 0.3);
 }
 
-.device-card.is-dragging {
-  opacity: 0.5;
-  transform: scale(0.98);
-}
-
 .muted ul {
   margin: 0.8rem 0 0;
   padding-left: 1rem;

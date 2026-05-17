@@ -40,11 +40,32 @@
             <h2 id="devices-title">Dispositivos</h2>
             <button id="refresh-all" class="ghost" type="button">Atualizar</button>
           </div>
-          <p class="note">Arraste os botões para ordenar.</p>
+          <div class="room-filter" id="room-filter">
+            <button class="chip is-active" type="button" data-room="all">Todas</button>
+            {% for room in rooms %}
+            <button class="chip" type="button" data-room="{{ room }}">{{ room }}</button>
+            {% endfor %}
+          </div>
 
-          <div class="room-filter" id="room-filter"></div>
-
-          <div class="device-list" id="device-list"></div>
+          <div class="device-list" id="device-list">
+            {% for device in devices %}
+            <button class="device-card is-off" data-device-id="{{ device.id }}" data-room="{{ device.room }}" type="button" data-action="toggle" title="Toggle {{ device.name }}">
+              {% if device.image %}
+              <img class="device-image" src="{{ device.image }}" alt="{{ device.name }}">
+              {% else %}
+              <div class="device-image fallback-icon" aria-hidden="true">💡</div>
+              {% endif %}
+              <div class="device-meta">
+                <h3>{{ device.name }}</h3>
+                <p class="host">{{ device.host }}</p>
+                {% if device.other_names %}
+                <p class="aliases">{{ device.other_names|join(' / ') }}</p>
+                {% endif %}
+                <p class="state" data-state>Checking...</p>
+              </div>
+            </button>
+            {% endfor %}
+          </div>
         </section>
 
         <section class="panel muted">
@@ -111,6 +132,9 @@
     </div>
   </div>
 
+  <script>
+    window.__CONFIGURED_DEVICES__ = {{ devices|tojson }};
+  </script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>

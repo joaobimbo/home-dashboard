@@ -9,7 +9,13 @@ scene_store = SceneStore()
 
 @app.route("/")
 def index():
-    return render_template("index.html", devices=controller.devices)
+    configured = controller.list_configured_devices()
+    rooms = sorted({item.get("room", "Casa") for item in configured})
+    return render_template(
+        "index.html",
+        devices=configured,
+        rooms=rooms,
+    )
 
 
 @app.route("/api/status")
@@ -37,15 +43,6 @@ def shelly_configured():
 def shelly_update_config(device_id):
     payload = request.get_json(silent=True) or {}
     result = controller.update_device_config(device_id, payload)
-    status_code = 200 if result.get("ok") else 400
-    return jsonify(result), status_code
-
-
-@app.route("/api/shelly/order", methods=["POST"])
-def shelly_reorder_devices():
-    payload = request.get_json(silent=True) or {}
-    ordered_ids = payload.get("ordered_ids", [])
-    result = controller.reorder_devices(ordered_ids)
     status_code = 200 if result.get("ok") else 400
     return jsonify(result), status_code
 
