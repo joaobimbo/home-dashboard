@@ -1,41 +1,46 @@
 # AGENTS.md — Home Dashboard
 
-## Scope and constraints
+## Scope (current project)
 
-- Current milestone is only the dashboard frame + Shelly controls; do not implement Spotify/calendar/photos/voice yet.
-- Keep stack minimal: Python + Flask + Jinja templates + plain HTML/CSS + small vanilla JS.
-- Do not introduce Node/npm/frontend frameworks, Docker, or a database unless explicitly requested.
+- Keep this repo focused on local dashboard + Shelly controls.
+- Do not add Spotify/calendar/photos/voice features unless explicitly requested.
+- Keep stack minimal: Python + Flask + Jinja + plain HTML/CSS + small vanilla JS (no Node/npm/framework migration, no Docker, no DB by default).
 
-## Entrypoints and runtime
+## Runtime and verification
 
-- Start server with `python app.py`.
-- Flask binds `0.0.0.0:5000` in `app.py`, so it should work on LAN at `http://<host-ip>:5000`.
-- Main wiring is in `app.py`: page route `/`, health `/api/status`, Shelly APIs under `/api/shelly/*`.
+- Install deps with `pip install -r requirements.txt`.
+- Run server with `python app.py` (binds `0.0.0.0:5000`).
+- Fast sanity check before commit: `python -m py_compile app.py modules/shelly/controller.py modules/shelly/discover.py`.
+- There is no configured test/lint pipeline in repo; prefer focused smoke checks over invented commands.
 
-## Shelly architecture (important)
+## Real entrypoints
 
-- Shelly code is centralized in `modules/shelly/`.
-- Browser never calls Shelly devices directly; all control/status goes through Flask endpoints.
-- Device list source order in `ShellyController.from_sources()`:
+- Backend wiring is in `app.py`.
+  - UI route: `/`
+  - health: `/api/status`
+  - Shelly APIs: `/api/shelly/*`
+  - scenes APIs still exist in backend (`/api/scenes*`) even if UI is currently trimmed.
+- Frontend entrypoints: `templates/index.html`, `static/app.js`, `static/style.css`.
+
+## Shelly module conventions
+
+- All Shelly logic is centralized in `modules/shelly/`.
+- Browser must not call Shelly devices directly; always go through Flask endpoints.
+- `ShellyController.from_sources()` load order:
   1) `modules/shelly/devices.json`
-  2) `SHELLY_DEVICES_JSON` env var
-  3) hardcoded fallback sample devices
+  2) `SHELLY_DEVICES_JSON`
+  3) hardcoded fallback devices
 
-## Discovery workflow
+## Discovery workflow (important)
 
-- Discovery is manual/on-demand via `python modules/shelly/discover.py`; it is not part of server startup.
-- Default discovery scan is CIDR `192.168.1.0/24`; override with `--network`.
-- Discovery writes editable JSON to `modules/shelly/devices.json` (default) and merges manual fields unless `--no-merge`.
-- Supported naming fields in registry: `device_name` (discovered), `display_name` (UI/manual), `other_names` (aliases).
+- Discovery is manual/on-demand only: `python modules/shelly/discover.py`.
+- Default scan: `192.168.1.0/24`, timeout `1.5s`, workers `64`.
+- Override network/timeout when needed, e.g. `python modules/shelly/discover.py --network 192.168.1.0/24 --timeout 2.0`.
+- Output defaults to `modules/shelly/devices.json` and merges manual fields unless `--no-merge`.
+- Discovery now emits per-channel entries with `component` + `relay` (e.g. covers, switches, dimmers); preserve these fields when editing JSON.
+- Manual display names/images are expected to be edited in `devices.json` and should survive discovery merges.
 
-## File-level map
+## Old iPad compatibility
 
-- `app.py`: Flask app + API routes.
-- `modules/shelly/controller.py`: config loading, device status reads, on/off/toggle actions.
-- `modules/shelly/discover.py`: LAN scan + config generation/merge.
-- `templates/index.html`, `static/app.js`, `static/style.css`: dashboard UI.
-
-## Verified dev checks
-
-- No repo test/lint/typecheck config is present right now; use focused smoke checks.
-- Useful quick check: `python -m py_compile app.py modules/shelly/controller.py modules/shelly/discover.py`.
+- Keep JS ES5-compatible in `static/app.js` (no `async/await`, no arrow functions, no modern-only APIs unless polyfilled).
+- Prefer touch-safe interactions and simple controls; old iPad Safari has inconsistent behavior with some slider/click patterns.
