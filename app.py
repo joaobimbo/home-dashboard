@@ -1,6 +1,8 @@
 from flask import Flask, jsonify, render_template, request
 
 from modules.shelly import SceneStore, ShellyController
+import os
+import subprocess
 
 app = Flask(__name__)
 controller = ShellyController.from_sources()
@@ -139,6 +141,11 @@ def shelly_light_level(device_id):
     status_code = 200 if result.get("ok") else 400
     return jsonify(result), status_code
 
+
+@app.route("/screen/off", methods=["GET","POST"])
+def screen_off():
+    subprocess.run(["xset","dpms","force","off"])
+    return {"ok": True}
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
