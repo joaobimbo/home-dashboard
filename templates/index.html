@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=Fraunces:opsz,wght@9..144,600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='16') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='18') }}">
 </head>
 <body>
   <div class="dashboard-shell">
@@ -32,6 +32,32 @@
           <div class="panel-head">
             <h2 id="devices-title">Dispositivos</h2>
           </div>
+
+          {% if daikin_devices %}
+          <div class="ac-list" id="ac-list">
+            {% for ac in daikin_devices %}
+            <div class="ac-card" data-ac-id="{{ ac.id }}" data-room="{{ ac.room }}">
+              <div class="ac-head">
+                <h3>{{ ac.name }}</h3>
+                <span class="ac-status" data-ac-status>--</span>
+                <span class="cover-cmd ac-refresh" data-ac-refresh role="button" tabindex="0" title="Atualizar estado">&#8635;</span>
+              </div>
+              <div class="ac-row">
+                <button type="button" class="switch ac-power" data-ac-power>Ligar / Desligar</button>
+              </div>
+              <div class="ac-setpoint">
+                <span class="cover-cmd" data-ac-temp-step="-1" role="button" tabindex="0">-</span>
+                <span class="ac-setpoint-value" data-ac-setpoint>--&deg;</span>
+                <span class="cover-cmd" data-ac-temp-step="1" role="button" tabindex="0">+</span>
+              </div>
+              <div class="ac-row ac-row-pickers">
+                <button type="button" class="ghost ac-picker-btn" data-ac-mode-open>Modo: <span data-ac-mode-label>--</span></button>
+                <button type="button" class="ghost ac-picker-btn" data-ac-fan-open>Ventoinha: <span data-ac-fan-label>--</span></button>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
 
           <div class="device-list" id="device-list">
             {% for device in devices %}
@@ -109,9 +135,40 @@
     </div>
   </div>
 
+  <div class="cover-modal" id="ac-mode-modal" hidden>
+    <div class="cover-modal-card" role="dialog" aria-modal="true" aria-labelledby="ac-mode-modal-title">
+      <h3 id="ac-mode-modal-title">Modo</h3>
+      <div class="cover-modal-presets" id="ac-mode-modal-options">
+        <span class="cover-cmd" data-ac-mode-option="auto" role="button" tabindex="0">Auto</span>
+        <span class="cover-cmd" data-ac-mode-option="cool" role="button" tabindex="0">Frio</span>
+        <span class="cover-cmd" data-ac-mode-option="heat" role="button" tabindex="0">Calor</span>
+        <span class="cover-cmd" data-ac-mode-option="fan" role="button" tabindex="0">Ventilação</span>
+        <span class="cover-cmd" data-ac-mode-option="dry" role="button" tabindex="0">Desumidificar</span>
+      </div>
+      <div class="cover-modal-actions">
+        <button type="button" class="cover-modal-btn" id="ac-mode-modal-cancel">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="cover-modal" id="ac-fan-modal" hidden>
+    <div class="cover-modal-card" role="dialog" aria-modal="true" aria-labelledby="ac-fan-modal-title">
+      <h3 id="ac-fan-modal-title">Intensidade da ventoinha</h3>
+      <div class="cover-modal-presets" id="ac-fan-modal-options">
+        <span class="cover-cmd" data-ac-fan-option="auto" role="button" tabindex="0">Auto</span>
+        <span class="cover-cmd" data-ac-fan-option="low" role="button" tabindex="0">Baixa</span>
+        <span class="cover-cmd" data-ac-fan-option="mid" role="button" tabindex="0">Média</span>
+        <span class="cover-cmd" data-ac-fan-option="high" role="button" tabindex="0">Alta</span>
+      </div>
+      <div class="cover-modal-actions">
+        <button type="button" class="cover-modal-btn" id="ac-fan-modal-cancel">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     window.__CONFIGURED_DEVICES__ = {{ devices|tojson }};
   </script>
-  <script src="{{ url_for('static', filename='app.js', v='16') }}"></script>
+  <script src="{{ url_for('static', filename='app.js', v='18') }}"></script>
 </body>
 </html>

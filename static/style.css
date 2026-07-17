@@ -566,6 +566,93 @@ button:hover {
   color: var(--text-soft);
 }
 
+.ac-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 0.7rem;
+  margin-bottom: 0.9rem;
+}
+
+.ac-card {
+  border-radius: 14px;
+  border: 1px solid var(--tile-border);
+  background: linear-gradient(165deg, rgba(250, 241, 227, 0.95), var(--tile));
+  padding: 0.7rem;
+  animation: pop 420ms ease-out both;
+}
+
+.ac-card.is-busy {
+  opacity: 0.65;
+}
+
+.ac-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.ac-head h3 {
+  margin: 0;
+  font-size: 0.92rem;
+  flex: 1;
+}
+
+.ac-status {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-soft);
+}
+
+.ac-refresh {
+  padding: 0.3rem 0.5rem;
+  min-height: 32px;
+  min-width: 32px;
+  font-size: 0.95rem;
+}
+
+.ac-row {
+  margin-top: 0.55rem;
+}
+
+.ac-row .ac-power {
+  width: 100%;
+  min-height: 44px;
+  padding: 0.5rem 0.7rem;
+}
+
+.ac-setpoint {
+  margin-top: 0.6rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+}
+
+.ac-setpoint-value {
+  font-size: 1.3rem;
+  font-weight: 700;
+  min-width: 3.2ch;
+  text-align: center;
+}
+
+.ac-row-pickers {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.ac-picker-btn {
+  flex: 1;
+  min-height: 40px;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.ac-card.is-on .ac-status {
+  color: var(--accent-on);
+}
+
 @media (max-width: 860px) {
   .dashboard-shell {
     grid-template-columns: 1fr;

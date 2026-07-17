@@ -19,6 +19,7 @@
   - UI route: `/`
   - health: `/api/status`
   - Shelly APIs: `/api/shelly/*`
+  - Daikin/Madoka APIs: `/api/daikin/*`
   - scenes APIs still exist in backend (`/api/scenes*`) even if UI is currently trimmed.
 - Frontend entrypoints: `templates/index.html`, `static/app.js`, `static/style.css`.
 
@@ -30,6 +31,19 @@
   1) `modules/shelly/devices.json`
   2) `SHELLY_DEVICES_JSON`
   3) hardcoded fallback devices
+
+## Daikin (Madoka BRC1H) module conventions
+
+- All Daikin logic is centralized in `modules/daikin/`, using the `pymadoka` library (BLE, Linux-only — relies on `bluetoothctl`).
+- `bleak` is pinned to `<1` in `requirements.txt`: `pymadoka` calls the old top-level `bleak.discover()` shim, which was removed in `bleak` 1.0+. Do not let this pin drift without checking pymadoka still imports cleanly.
+- Browser must not talk BLE directly; always go through Flask `/api/daikin/*` endpoints, which run one connect/command/disconnect cycle per request (several seconds of latency is expected and normal).
+- `DaikinController.from_sources()` load order:
+  1) `modules/daikin/devices.json`
+  2) `DAIKIN_DEVICES_JSON`
+  3) empty list (no hardcoded fallback — MAC addresses are household-specific)
+- Pairing is manual/on-demand only: `python modules/daikin/pair.py` (run on the Linux host with Bluetooth hardware). It walks through `bluetoothctl` pairing interactively, then appends the device (id/display_name/room/address/adapter) to `devices.json`.
+- The dashboard does not auto-poll AC status (unlike Shelly's 5s polling) to avoid hammering the BLE stack; each card fetches its status once on page load and after every action, plus a manual refresh button.
+- Exposed controls: power on/off, mode (`auto`/`cool`/`heat`/`dry`/`fan`), single setpoint temperature (applied to both cooling and heating set points), fan speed (`auto`/`low`/`mid`/`high`).
 
 ## Discovery workflow (important)
 

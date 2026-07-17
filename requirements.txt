@@ -1,1 +1,3 @@
 Flask>=2.3,<4
+pymadoka
+bleak<1

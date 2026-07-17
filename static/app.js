@@ -1,5 +1,6 @@
 (function () {
   var deviceList = document.getElementById("device-list");
+  var acList = document.getElementById("ac-list");
   var clockWidget = document.getElementById("clock-widget");
   var coverModal = document.getElementById("cover-modal");
   var coverModalValue = document.getElementById("cover-modal-value");
@@ -13,10 +14,17 @@
   var lightModalPresets = document.getElementById("light-modal-presets");
   var lightModalCancel = document.getElementById("light-modal-cancel");
   var lightModalSave = document.getElementById("light-modal-save");
+  var acModeModal = document.getElementById("ac-mode-modal");
+  var acModeModalOptions = document.getElementById("ac-mode-modal-options");
+  var acModeModalCancel = document.getElementById("ac-mode-modal-cancel");
+  var acFanModal = document.getElementById("ac-fan-modal");
+  var acFanModalOptions = document.getElementById("ac-fan-modal-options");
+  var acFanModalCancel = document.getElementById("ac-fan-modal-cancel");
   var refreshInFlight = false;
   var statusTimer = null;
   var activeCoverCard = null;
   var activeLightCard = null;
+  var activeAcCard = null;
   var touchStartX = 0;
   var touchStartY = 0;
   var touchMoved = false;
@@ -364,6 +372,281 @@
     });
   }
 
+  var acModeLabels = {
+    auto: "Auto",
+    cool: "Frio",
+    heat: "Calor",
+    dry: "Desumidificar",
+    fan: "Ventilação"
+  };
+
+  var acFanLabels = {
+    auto: "Auto",
+    low: "Baixa",
+    mid: "Média",
+    high: "Alta"
+  };
+
+  function paintAcCard(card, info) {
+    var statusNode = card.querySelector("[data-ac-status]");
+    var setpointNode = card.querySelector("[data-ac-setpoint]");
+    var powerBtn = card.querySelector("[data-ac-power]");
+    var modeLabelNode = card.querySelector("[data-ac-mode-label]");
+    var fanLabelNode = card.querySelector("[data-ac-fan-label]");
+
+    card.classList.remove("is-on", "is-off", "is-error");
+
+    if (!info || !info.ok) {
+      if (statusNode) {
+        statusNode.textContent = "Erro";
+      }
+      card.classList.add("is-error");
+      return;
+    }
+
+    card.setAttribute("data-ac-current-setpoint", String(info.setpoint));
+    card.setAttribute("data-ac-current-mode", info.mode);
+    card.setAttribute("data-ac-current-fan", info.fan_speed);
+
+    if (info.power) {
+      card.classList.add("is-on");
+      if (statusNode) {
+        statusNode.textContent = (acModeLabels[info.mode] || info.mode) + " · Ligado";
+      }
+      if (powerBtn) {
+        powerBtn.textContent = "Desligar";
+      }
+    } else {
+      card.classList.add("is-off");
+      if (statusNode) {
+        statusNode.textContent = "Desligado";
+      }
+      if (powerBtn) {
+        powerBtn.textContent = "Ligar";
+      }
+    }
+
+    if (setpointNode && typeof info.setpoint === "number") {
+      setpointNode.textContent = String(info.setpoint) + "°";
+    }
+
+    if (modeLabelNode) {
+      modeLabelNode.textContent = acModeLabels[info.mode] || info.mode || "--";
+    }
+
+    if (fanLabelNode) {
+      fanLabelNode.textContent = acFanLabels[info.fan_speed] || info.fan_speed || "--";
+    }
+  }
+
+  function setAcBusy(card, busy) {
+    if (busy) {
+      card.classList.add("is-busy");
+    } else {
+      card.classList.remove("is-busy");
+    }
+  }
+
+  function runAcCommand(card, method, path, payload) {
+    setAcBusy(card, true);
+    requestJSON(method, path, payload, function (_err, result) {
+      setAcBusy(card, false);
+      paintAcCard(card, _err ? null : result);
+    });
+  }
+
+  function refreshAcStatus(card, done) {
+    setAcBusy(card, true);
+    requestJSON(
+      "GET",
+      "/api/daikin/" + card.getAttribute("data-ac-id") + "/status",
+      null,
+      function (_err, result) {
+        setAcBusy(card, false);
+        paintAcCard(card, _err ? null : result);
+        if (done) {
+          done();
+        }
+      }
+    );
+  }
+
+  function refreshAllAcStatuses() {
+    var cards = document.querySelectorAll(".ac-card[data-ac-id]");
+    var index = 0;
+
+    function next() {
+      if (index >= cards.length) {
+        return;
+      }
+      var card = cards[index];
+      index += 1;
+      refreshAcStatus(card, next);
+    }
+
+    next();
+  }
+
+  function closeAcModeModal() {
+    if (!acModeModal) {
+      return;
+    }
+    acModeModal.hidden = true;
+    activeAcCard = null;
+  }
+
+  function closeAcFanModal() {
+    if (!acFanModal) {
+      return;
+    }
+    acFanModal.hidden = true;
+    activeAcCard = null;
+  }
+
+  function openAcModeModal(card) {
+    if (!acModeModal) {
+      return;
+    }
+    activeAcCard = card;
+    acModeModal.hidden = false;
+  }
+
+  function openAcFanModal(card) {
+    if (!acFanModal) {
+      return;
+    }
+    activeAcCard = card;
+    acFanModal.hidden = false;
+  }
+
+  function handleAcListActivate(target) {
+    var card = closestWithAttr(target, "data-ac-id");
+    var powerBtn;
+    var tempStep;
+    var refreshBtn;
+    var modeOpenBtn;
+    var fanOpenBtn;
+    var current;
+    var next;
+
+    if (!card || card.classList.contains("is-busy")) {
+      return;
+    }
+
+    powerBtn = closestWithAttr(target, "data-ac-power");
+    tempStep = closestWithAttr(target, "data-ac-temp-step");
+    refreshBtn = closestWithAttr(target, "data-ac-refresh");
+    modeOpenBtn = closestWithAttr(target, "data-ac-mode-open");
+    fanOpenBtn = closestWithAttr(target, "data-ac-fan-open");
+
+    if (refreshBtn) {
+      refreshAcStatus(card);
+      return;
+    }
+
+    if (modeOpenBtn) {
+      openAcModeModal(card);
+      return;
+    }
+
+    if (fanOpenBtn) {
+      openAcFanModal(card);
+      return;
+    }
+
+    if (powerBtn) {
+      runAcCommand(
+        card,
+        "POST",
+        "/api/daikin/" + card.getAttribute("data-ac-id") + "/power",
+        { state: card.classList.contains("is-on") ? "off" : "on" }
+      );
+      return;
+    }
+
+    if (tempStep) {
+      current = parseInt(card.getAttribute("data-ac-current-setpoint") || "22", 10);
+      if (isNaN(current)) {
+        current = 22;
+      }
+      next = current + parseInt(tempStep.getAttribute("data-ac-temp-step"), 10);
+      runAcCommand(
+        card,
+        "POST",
+        "/api/daikin/" + card.getAttribute("data-ac-id") + "/setpoint",
+        { temperature: next }
+      );
+    }
+  }
+
+  if (acList) {
+    acList.addEventListener("click", function (event) {
+      handleAcListActivate(event.target);
+    });
+  }
+
+  if (acModeModalOptions) {
+    acModeModalOptions.addEventListener("click", function (event) {
+      var option = closestWithAttr(event.target, "data-ac-mode-option");
+      var card = activeAcCard;
+      if (!option || !card) {
+        return;
+      }
+      closeAcModeModal();
+      runAcCommand(
+        card,
+        "POST",
+        "/api/daikin/" + card.getAttribute("data-ac-id") + "/mode",
+        { mode: option.getAttribute("data-ac-mode-option") }
+      );
+    });
+  }
+
+  if (acModeModalCancel) {
+    acModeModalCancel.addEventListener("click", function () {
+      closeAcModeModal();
+    });
+  }
+
+  if (acModeModal) {
+    acModeModal.addEventListener("click", function (event) {
+      if (event.target === acModeModal) {
+        closeAcModeModal();
+      }
+    });
+  }
+
+  if (acFanModalOptions) {
+    acFanModalOptions.addEventListener("click", function (event) {
+      var option = closestWithAttr(event.target, "data-ac-fan-option");
+      var card = activeAcCard;
+      if (!option || !card) {
+        return;
+      }
+      closeAcFanModal();
+      runAcCommand(
+        card,
+        "POST",
+        "/api/daikin/" + card.getAttribute("data-ac-id") + "/fan",
+        { speed: option.getAttribute("data-ac-fan-option") }
+      );
+    });
+  }
+
+  if (acFanModalCancel) {
+    acFanModalCancel.addEventListener("click", function () {
+      closeAcFanModal();
+    });
+  }
+
+  if (acFanModal) {
+    acFanModal.addEventListener("click", function (event) {
+      if (event.target === acFanModal) {
+        closeAcFanModal();
+      }
+    });
+  }
+
   function tickClock() {
     var now;
     var hh;
@@ -566,4 +849,5 @@
   setInterval(tickClock, 1000);
   refreshAll();
   startStatusPolling();
+  refreshAllAcStatuses();
 })();

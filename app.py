@@ -1,21 +1,28 @@
 from flask import Flask, jsonify, render_template, request
 
 from modules.shelly import SceneStore, ShellyController
+from modules.daikin import DaikinController
 import os
 import subprocess
 
 app = Flask(__name__)
 controller = ShellyController.from_sources()
 scene_store = SceneStore()
+daikin_controller = DaikinController.from_sources()
 
 
 @app.route("/")
 def index():
     configured = controller.list_configured_devices()
-    rooms = sorted({item.get("room", "Casa") for item in configured})
+    daikin_devices = daikin_controller.list_configured_devices()
+    rooms = sorted(
+        {item.get("room", "Casa") for item in configured}
+        | {item.get("room", "Casa") for item in daikin_devices}
+    )
     return render_template(
         "index.html",
         devices=configured,
+        daikin_devices=daikin_devices,
         rooms=rooms,
     )
 
@@ -138,6 +145,59 @@ def shelly_light_level(device_id):
         return jsonify({"ok": False, "error": "Invalid brightness"}), 400
 
     result = controller.set_light_brightness(device_id, level)
+    status_code = 200 if result.get("ok") else 400
+    return jsonify(result), status_code
+
+
+@app.route("/api/daikin/devices")
+def daikin_devices():
+    return jsonify(daikin_controller.list_configured_devices())
+
+
+@app.route("/api/daikin/<device_id>/status")
+def daikin_status(device_id):
+    result = daikin_controller.get_status(device_id)
+    status_code = 200 if result.get("ok") else 400
+    return jsonify(result), status_code
+
+
+@app.route("/api/daikin/<device_id>/power", methods=["POST"])
+def daikin_power(device_id):
+    payload = request.get_json(silent=True) or {}
+    state = str(payload.get("state", "")).strip().lower()
+    if state not in {"on", "off"}:
+        return jsonify({"ok": False, "error": "Invalid state"}), 400
+    result = daikin_controller.set_power(device_id, state == "on")
+    status_code = 200 if result.get("ok") else 400
+    return jsonify(result), status_code
+
+
+@app.route("/api/daikin/<device_id>/mode", methods=["POST"])
+def daikin_mode(device_id):
+    payload = request.get_json(silent=True) or {}
+    mode = str(payload.get("mode", "")).strip().lower()
+    result = daikin_controller.set_mode(device_id, mode)
+    status_code = 200 if result.get("ok") else 400
+    return jsonify(result), status_code
+
+
+@app.route("/api/daikin/<device_id>/setpoint", methods=["POST"])
+def daikin_setpoint(device_id):
+    payload = request.get_json(silent=True) or {}
+    try:
+        temperature = float(payload.get("temperature"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Invalid temperature"}), 400
+    result = daikin_controller.set_setpoint(device_id, temperature)
+    status_code = 200 if result.get("ok") else 400
+    return jsonify(result), status_code
+
+
+@app.route("/api/daikin/<device_id>/fan", methods=["POST"])
+def daikin_fan(device_id):
+    payload = request.get_json(silent=True) or {}
+    speed = str(payload.get("speed", "")).strip().lower()
+    result = daikin_controller.set_fan_speed(device_id, speed)
     status_code = 200 if result.get("ok") else 400
     return jsonify(result), status_code
 
