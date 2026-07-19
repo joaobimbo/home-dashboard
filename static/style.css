@@ -160,6 +160,42 @@ h2 {
   font-size: 1.05rem;
 }
 
+.category-tabs {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin: 0 0 0.8rem;
+}
+
+.category-tab {
+  padding: 0.4rem 0.95rem;
+  min-height: 38px;
+  border-radius: 999px;
+  border: 1px solid rgba(120, 90, 56, 0.28);
+  background: rgba(241, 229, 209, 0.7);
+  color: var(--text-soft);
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.category-tab.is-active {
+  background: rgba(224, 187, 131, 0.9);
+  border-color: rgba(129, 93, 51, 0.55);
+  color: var(--text-main);
+}
+
+/* .ac-list/.device-list set an explicit display, which overrides the
+   browser's default [hidden] styling - so category sections need this
+   spelled out to actually disappear when not the active tab. */
+.ac-list[hidden],
+.device-list[hidden] {
+  display: none;
+}
+
 .device-list {
   display: flex;
   flex-wrap: wrap;

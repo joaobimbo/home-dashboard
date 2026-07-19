@@ -1,6 +1,7 @@
 (function () {
   var deviceList = document.getElementById("device-list");
   var acList = document.getElementById("ac-list");
+  var categoryTabs = document.querySelector(".category-tabs");
   var clockWidget = document.getElementById("clock-widget");
   var weatherTempNode = document.querySelector("[data-weather-temp]");
   var weatherLabelNode = document.querySelector("[data-weather-label]");
@@ -109,6 +110,23 @@
     for (i = 0; i < list.length; i += 1) {
       fn(list[i], i);
     }
+  }
+
+  function showCategory(name) {
+    var sections = document.querySelectorAll("[data-category-section]");
+    var tabs = document.querySelectorAll("[data-category-tab]");
+    eachNode(sections, function (section) {
+      section.hidden = section.getAttribute("data-category-section") !== name;
+    });
+    eachNode(tabs, function (tab) {
+      var isActive = tab.getAttribute("data-category-tab") === name;
+      if (isActive) {
+        tab.classList.add("is-active");
+      } else {
+        tab.classList.remove("is-active");
+      }
+      tab.setAttribute("aria-selected", isActive ? "true" : "false");
+    });
   }
 
   function removeClasses(el, names) {
@@ -660,6 +678,16 @@
   if (acList) {
     acList.addEventListener("click", function (event) {
       handleAcListActivate(event.target);
+    });
+  }
+
+  if (categoryTabs) {
+    categoryTabs.addEventListener("click", function (event) {
+      var tab = closestWithAttr(event.target, "data-category-tab");
+      if (!tab) {
+        return;
+      }
+      showCategory(tab.getAttribute("data-category-tab"));
     });
   }
 

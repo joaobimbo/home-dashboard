@@ -23,6 +23,7 @@
   - scenes APIs still exist in backend (`/api/scenes*`) even if UI is currently trimmed.
   - weather: `/api/weather` — server-side fetch of `wttr.in` (see `modules/weather.py`), cached in-process for 30 minutes so the header widget doesn't hit the external service on every page load/poll. Frontend polls it every 15 minutes (`startWeatherPolling()` in `static/app.js`).
 - Frontend entrypoints: `templates/index.html`, `static/app.js`, `static/style.css`.
+- Devices are grouped into category tabs (AC / Luzes / Estores) in `templates/index.html` — Shelly `devices` is split server-side into `lights_devices` (everything except `component == 'cover'`) and `covers_devices` via Jinja `selectattr`/`rejectattr`, with a shared `device_card()` macro to avoid duplicating the card markup. All categories are rendered into the DOM up front (nothing is fetched on tab switch); `showCategory()` in `static/app.js` just toggles the `hidden` attribute on `[data-category-section]` containers, so switching tabs is instant and background polling keeps every category's data fresh even while hidden. `.ac-list`/`.device-list` set an explicit `display`, so `[hidden]` needs an explicit `display: none` override in `static/style.css` (same pattern already used for `.cover-modal[hidden]`).
 
 ## Shelly module conventions
 

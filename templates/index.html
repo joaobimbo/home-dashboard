@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=Fraunces:opsz,wght@9..144,600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='22') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='23') }}">
 </head>
 <body>
   <div class="dashboard-shell">
@@ -27,14 +27,66 @@
         </div>
       </header>
 
+      {% set covers_devices = devices | selectattr('component', 'equalto', 'cover') | list %}
+      {% set lights_devices = devices | rejectattr('component', 'equalto', 'cover') | list %}
+      {% if daikin_devices %}
+        {% set default_category = 'ac' %}
+      {% elif lights_devices %}
+        {% set default_category = 'lights' %}
+      {% elif covers_devices %}
+        {% set default_category = 'covers' %}
+      {% else %}
+        {% set default_category = 'ac' %}
+      {% endif %}
+
+      {% macro device_card(device) %}
+        <button class="device-card is-off {% if device.image %}has-bg-image{% endif %}" data-device-id="{{ device.id }}" data-room="{{ device.room }}" data-component="{{ device.component or 'relay' }}" type="button" data-action="toggle" title="Toggle {{ device.name }}" {% if device.image %}style="--card-bg-image: url('{{ device.image }}');"{% endif %}>
+          {% if not device.image %}
+          <div class="device-image fallback-icon" aria-hidden="true">{% if (device.component or 'relay') == 'cover' %}🪟{% elif (device.component or 'relay') == 'light' %}🔆{% else %}💡{% endif %}</div>
+          {% endif %}
+          <div class="device-meta">
+            <h3>{{ device.name }}</h3>
+            <p class="host">{{ device.host }}</p>
+            {% if device.other_names %}
+            <p class="aliases">{{ device.other_names|join(' / ') }}</p>
+            {% endif %}
+            <p class="state" data-state>Checking...</p>
+            {% if (device.component or 'relay') == 'cover' %}
+            <div class="cover-controls" aria-label="Roller controls">
+              <span class="cover-cmd" data-cover-cmd="open" role="button" tabindex="0">↑</span>
+              <span class="cover-cmd" data-cover-cmd="close" role="button" tabindex="0">↓</span>
+              <span class="cover-cmd" data-cover-cmd="stop" role="button" tabindex="0">■</span>
+            </div>
+            {% endif %}
+            {% if (device.component or 'relay') == 'light' %}
+            <div class="cover-controls" aria-label="Dimmer controls">
+              <span class="cover-cmd" data-light-set="1" role="button" tabindex="0">%</span>
+            </div>
+            {% endif %}
+          </div>
+        </button>
+      {% endmacro %}
+
       <main class="layout">
         <section class="panel" aria-labelledby="devices-title">
           <div class="panel-head">
             <h2 id="devices-title">Dispositivos</h2>
           </div>
 
+          <div class="category-tabs" role="tablist" aria-label="Categorias">
+            {% if daikin_devices %}
+            <button type="button" class="category-tab{% if default_category == 'ac' %} is-active{% endif %}" data-category-tab="ac" role="tab" aria-selected="{% if default_category == 'ac' %}true{% else %}false{% endif %}">AC</button>
+            {% endif %}
+            {% if lights_devices %}
+            <button type="button" class="category-tab{% if default_category == 'lights' %} is-active{% endif %}" data-category-tab="lights" role="tab" aria-selected="{% if default_category == 'lights' %}true{% else %}false{% endif %}">Luzes</button>
+            {% endif %}
+            {% if covers_devices %}
+            <button type="button" class="category-tab{% if default_category == 'covers' %} is-active{% endif %}" data-category-tab="covers" role="tab" aria-selected="{% if default_category == 'covers' %}true{% else %}false{% endif %}">Estores</button>
+            {% endif %}
+          </div>
+
           {% if daikin_devices %}
-          <div class="ac-list" id="ac-list">
+          <div class="ac-list" id="ac-list" data-category-section="ac" {% if default_category != 'ac' %}hidden{% endif %}>
             {% for ac in daikin_devices %}
             <div class="ac-card" data-ac-id="{{ ac.id }}" data-room="{{ ac.room }}">
               <div class="ac-head">
@@ -62,34 +114,22 @@
           </div>
           {% endif %}
 
-          <div class="device-list" id="device-list">
-            {% for device in devices %}
-            <button class="device-card is-off {% if device.image %}has-bg-image{% endif %}" data-device-id="{{ device.id }}" data-room="{{ device.room }}" data-component="{{ device.component or 'relay' }}" type="button" data-action="toggle" title="Toggle {{ device.name }}" {% if device.image %}style="--card-bg-image: url('{{ device.image }}');"{% endif %}>
-              {% if not device.image %}
-              <div class="device-image fallback-icon" aria-hidden="true">{% if (device.component or 'relay') == 'cover' %}🪟{% elif (device.component or 'relay') == 'light' %}🔆{% else %}💡{% endif %}</div>
-              {% endif %}
-              <div class="device-meta">
-                <h3>{{ device.name }}</h3>
-                <p class="host">{{ device.host }}</p>
-                {% if device.other_names %}
-                <p class="aliases">{{ device.other_names|join(' / ') }}</p>
-                {% endif %}
-                <p class="state" data-state>Checking...</p>
-                {% if (device.component or 'relay') == 'cover' %}
-                <div class="cover-controls" aria-label="Roller controls">
-                  <span class="cover-cmd" data-cover-cmd="open" role="button" tabindex="0">↑</span>
-                  <span class="cover-cmd" data-cover-cmd="close" role="button" tabindex="0">↓</span>
-                  <span class="cover-cmd" data-cover-cmd="stop" role="button" tabindex="0">■</span>
-                </div>
-                {% endif %}
-                {% if (device.component or 'relay') == 'light' %}
-                <div class="cover-controls" aria-label="Dimmer controls">
-                  <span class="cover-cmd" data-light-set="1" role="button" tabindex="0">%</span>
-                </div>
-                {% endif %}
-              </div>
-            </button>
-            {% endfor %}
+          <div id="device-list">
+            {% if lights_devices %}
+            <div class="device-list" id="lights-list" data-category-section="lights" {% if default_category != 'lights' %}hidden{% endif %}>
+              {% for device in lights_devices %}
+              {{ device_card(device) }}
+              {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if covers_devices %}
+            <div class="device-list" id="covers-list" data-category-section="covers" {% if default_category != 'covers' %}hidden{% endif %}>
+              {% for device in covers_devices %}
+              {{ device_card(device) }}
+              {% endfor %}
+            </div>
+            {% endif %}
           </div>
         </section>
       </main>
@@ -191,6 +231,6 @@
   <script>
     window.__CONFIGURED_DEVICES__ = {{ devices|tojson }};
   </script>
-  <script src="{{ url_for('static', filename='app.js', v='26') }}"></script>
+  <script src="{{ url_for('static', filename='app.js', v='27') }}"></script>
 </body>
 </html>
