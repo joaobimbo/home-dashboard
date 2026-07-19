@@ -14,6 +14,12 @@
   var lightModalPresets = document.getElementById("light-modal-presets");
   var lightModalCancel = document.getElementById("light-modal-cancel");
   var lightModalSave = document.getElementById("light-modal-save");
+  var acSetpointModal = document.getElementById("ac-setpoint-modal");
+  var acSetpointModalValue = document.getElementById("ac-setpoint-modal-value");
+  var acSetpointModalSlider = document.getElementById("ac-setpoint-modal-slider");
+  var acSetpointModalPresets = document.getElementById("ac-setpoint-modal-presets");
+  var acSetpointModalCancel = document.getElementById("ac-setpoint-modal-cancel");
+  var acSetpointModalSave = document.getElementById("ac-setpoint-modal-save");
   var acModeModal = document.getElementById("ac-mode-modal");
   var acModeModalOptions = document.getElementById("ac-mode-modal-options");
   var acModeModalCancel = document.getElementById("ac-mode-modal-cancel");
@@ -22,6 +28,8 @@
   var acFanModalCancel = document.getElementById("ac-fan-modal-cancel");
   var refreshInFlight = false;
   var statusTimer = null;
+  var acRefreshInFlight = false;
+  var acStatusTimer = null;
   var activeCoverCard = null;
   var activeLightCard = null;
   var activeAcCard = null;
@@ -100,6 +108,29 @@
     }
   }
 
+  function removeClasses(el, names) {
+    var i;
+    for (i = 0; i < names.length; i += 1) {
+      el.classList.remove(names[i]);
+    }
+  }
+
+  function isPageHidden() {
+    if (typeof document.hidden !== "undefined") {
+      return document.hidden;
+    }
+    if (typeof document.webkitHidden !== "undefined") {
+      return document.webkitHidden;
+    }
+    return false;
+  }
+
+  var visibilityChangeEventName = (typeof document.hidden !== "undefined")
+    ? "visibilitychange"
+    : (typeof document.webkitHidden !== "undefined")
+      ? "webkitvisibilitychange"
+      : null;
+
   function paintCard(card, info) {
     var stateNode = card.querySelector("[data-state]");
     var component = (card.getAttribute("data-component") || "relay").toLowerCase();
@@ -108,8 +139,8 @@
       return;
     }
 
-    card.classList.remove("is-on", "is-off", "is-error", "is-busy");
-    stateNode.classList.remove("is-on", "is-off", "is-error");
+    removeClasses(card, ["is-on", "is-off", "is-error", "is-busy"]);
+    removeClasses(stateNode, ["is-on", "is-off", "is-error"]);
 
     if (!info || !info.ok) {
       stateNode.textContent = "Offline";
@@ -394,7 +425,7 @@
     var modeLabelNode = card.querySelector("[data-ac-mode-label]");
     var fanLabelNode = card.querySelector("[data-ac-fan-label]");
 
-    card.classList.remove("is-on", "is-off", "is-error");
+    removeClasses(card, ["is-on", "is-off", "is-error"]);
 
     if (!info || !info.ok) {
       if (statusNode) {
@@ -427,7 +458,7 @@
     }
 
     if (setpointNode && typeof info.setpoint === "number") {
-      setpointNode.textContent = String(info.setpoint) + "°";
+      setpointNode.textContent = String(info.setpoint);
     }
 
     if (modeLabelNode) {
@@ -455,11 +486,15 @@
     });
   }
 
-  function refreshAcStatus(card, done) {
+  function refreshAcStatus(card, done, live) {
+    var url = "/api/daikin/" + card.getAttribute("data-ac-id") + "/status";
+    if (live) {
+      url += "?live=1";
+    }
     setAcBusy(card, true);
     requestJSON(
       "GET",
-      "/api/daikin/" + card.getAttribute("data-ac-id") + "/status",
+      url,
       null,
       function (_err, result) {
         setAcBusy(card, false);
@@ -471,12 +506,15 @@
     );
   }
 
-  function refreshAllAcStatuses() {
+  function refreshAllAcStatuses(done) {
     var cards = document.querySelectorAll(".ac-card[data-ac-id]");
     var index = 0;
 
     function next() {
       if (index >= cards.length) {
+        if (done) {
+          done();
+        }
         return;
       }
       var card = cards[index];
@@ -485,6 +523,44 @@
     }
 
     next();
+  }
+
+  function startAcStatusPolling() {
+    if (acStatusTimer) {
+      clearInterval(acStatusTimer);
+    }
+    acStatusTimer = setInterval(function () {
+      if (isPageHidden() || acRefreshInFlight) {
+        return;
+      }
+      acRefreshInFlight = true;
+      refreshAllAcStatuses(function () {
+        acRefreshInFlight = false;
+      });
+    }, 30000);
+  }
+
+  function closeAcSetpointModal() {
+    if (!acSetpointModal) {
+      return;
+    }
+    acSetpointModal.hidden = true;
+    activeAcCard = null;
+  }
+
+  function openAcSetpointModal(card) {
+    var current;
+    if (!acSetpointModal || !acSetpointModalSlider || !acSetpointModalValue) {
+      return;
+    }
+    current = parseInt(card.getAttribute("data-ac-current-setpoint") || "22", 10);
+    if (isNaN(current)) {
+      current = 22;
+    }
+    activeAcCard = card;
+    acSetpointModalSlider.value = String(current);
+    acSetpointModalValue.textContent = String(current) + "°";
+    acSetpointModal.hidden = false;
   }
 
   function closeAcModeModal() {
@@ -522,25 +598,28 @@
   function handleAcListActivate(target) {
     var card = closestWithAttr(target, "data-ac-id");
     var powerBtn;
-    var tempStep;
+    var setpointOpenBtn;
     var refreshBtn;
     var modeOpenBtn;
     var fanOpenBtn;
-    var current;
-    var next;
 
     if (!card || card.classList.contains("is-busy")) {
       return;
     }
 
     powerBtn = closestWithAttr(target, "data-ac-power");
-    tempStep = closestWithAttr(target, "data-ac-temp-step");
+    setpointOpenBtn = closestWithAttr(target, "data-ac-setpoint-open");
     refreshBtn = closestWithAttr(target, "data-ac-refresh");
     modeOpenBtn = closestWithAttr(target, "data-ac-mode-open");
     fanOpenBtn = closestWithAttr(target, "data-ac-fan-open");
 
     if (refreshBtn) {
-      refreshAcStatus(card);
+      refreshAcStatus(card, null, true);
+      return;
+    }
+
+    if (setpointOpenBtn) {
+      openAcSetpointModal(card);
       return;
     }
 
@@ -563,25 +642,69 @@
       );
       return;
     }
-
-    if (tempStep) {
-      current = parseInt(card.getAttribute("data-ac-current-setpoint") || "22", 10);
-      if (isNaN(current)) {
-        current = 22;
-      }
-      next = current + parseInt(tempStep.getAttribute("data-ac-temp-step"), 10);
-      runAcCommand(
-        card,
-        "POST",
-        "/api/daikin/" + card.getAttribute("data-ac-id") + "/setpoint",
-        { temperature: next }
-      );
-    }
   }
 
   if (acList) {
     acList.addEventListener("click", function (event) {
       handleAcListActivate(event.target);
+    });
+  }
+
+  if (acSetpointModalSlider && acSetpointModalValue) {
+    acSetpointModalSlider.addEventListener("input", function () {
+      acSetpointModalValue.textContent = String(acSetpointModalSlider.value) + "°";
+    });
+    acSetpointModalSlider.addEventListener("change", function () {
+      acSetpointModalValue.textContent = String(acSetpointModalSlider.value) + "°";
+    });
+  }
+
+  if (acSetpointModalPresets) {
+    acSetpointModalPresets.addEventListener("click", function (event) {
+      var preset = closestWithAttr(event.target, "data-ac-setpoint-preset");
+      var value;
+      if (!preset) {
+        return;
+      }
+      value = preset.getAttribute("data-ac-setpoint-preset");
+      if (acSetpointModalSlider) {
+        acSetpointModalSlider.value = value;
+      }
+      if (acSetpointModalValue) {
+        acSetpointModalValue.textContent = String(value) + "°";
+      }
+    });
+  }
+
+  if (acSetpointModalCancel) {
+    acSetpointModalCancel.addEventListener("click", function () {
+      closeAcSetpointModal();
+    });
+  }
+
+  if (acSetpointModalSave) {
+    acSetpointModalSave.addEventListener("click", function () {
+      var value;
+      if (!activeAcCard || !acSetpointModalSlider) {
+        closeAcSetpointModal();
+        return;
+      }
+      value = parseInt(acSetpointModalSlider.value, 10);
+      runAcCommand(
+        activeAcCard,
+        "POST",
+        "/api/daikin/" + activeAcCard.getAttribute("data-ac-id") + "/setpoint",
+        { temperature: value }
+      );
+      closeAcSetpointModal();
+    });
+  }
+
+  if (acSetpointModal) {
+    acSetpointModal.addEventListener("click", function (event) {
+      if (event.target === acSetpointModal) {
+        closeAcSetpointModal();
+      }
     });
   }
 
@@ -671,11 +794,11 @@
       clearInterval(statusTimer);
     }
     statusTimer = setInterval(function () {
-      if (document.hidden) {
+      if (isPageHidden()) {
         return;
       }
       refreshAll();
-    }, 5000);
+    }, 30000);
   }
 
   if (deviceList) {
@@ -839,15 +962,18 @@
     });
   }
 
-  document.addEventListener("visibilitychange", function () {
-    if (!document.hidden) {
-      refreshAll();
-    }
-  });
+  if (visibilityChangeEventName) {
+    document.addEventListener(visibilityChangeEventName, function () {
+      if (!isPageHidden()) {
+        refreshAll();
+      }
+    });
+  }
 
   tickClock();
   setInterval(tickClock, 1000);
   refreshAll();
   startStatusPolling();
   refreshAllAcStatuses();
+  startAcStatusPolling();
 })();

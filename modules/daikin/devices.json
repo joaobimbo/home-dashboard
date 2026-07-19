@@ -1,1 +1,39 @@
-[]
+[
+  {
+    "id": "ac-escritorio-b4-cb-b8-7b-32-90",
+    "display_name": "AC Escritorio",
+    "other_names": [],
+    "room": "Escritorio",
+    "address": "B4:CB:B8:7B:32:90",
+    "adapter": "hci0",
+    "image": ""
+  },
+  {
+    "id": "ac-sala-b4-cb-b8-7a-25-47",
+    "display_name": "AC Sala",
+    "other_names": [],
+    "room": "Sala",
+    "address": "B4:CB:B8:7A:25:47",
+    "adapter": "hci0",
+    "image": ""
+  },
+  {
+    "id": "ac-quarto2-b8-c0-65-e8-23-c6",
+    "display_name": "AC Quarto 2",
+    "other_names": [],
+    "room": "Quarto 2",
+    "address": "B8:C0:65:E8:23:C6",
+    "adapter": "hci0",
+    "image": ""
+  },
+  {
+    "id": "ac-quarto-b8-c0-65-e8-45-63",
+    "display_name": "AC Quarto",
+    "other_names": [],
+    "room": "Quarto",
+    "address": "B8:C0:65:E8:45:63",
+    "adapter": "hci0",
+    "image": ""
+  }
+]
+

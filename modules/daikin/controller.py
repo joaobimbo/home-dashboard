@@ -1,6 +1,8 @@
 import asyncio
 import json
 import os
+import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -30,6 +32,8 @@ class DaikinControllerError(Exception):
 
 def _load_pymadoka():
     try:
+        from bleak import BleakClient, BleakScanner
+        from pymadoka import connection as pymadoka_connection
         from pymadoka.controller import Controller
         from pymadoka.connection import discover_devices, force_device_disconnect
         from pymadoka.features.setpoint import SetPointStatus
@@ -47,8 +51,11 @@ def _load_pymadoka():
 
     return {
         "Controller": Controller,
+        "connection_module": pymadoka_connection,
         "discover_devices": discover_devices,
         "force_device_disconnect": force_device_disconnect,
+        "BleakScanner": BleakScanner,
+        "BleakClient": BleakClient,
         "SetPointStatus": SetPointStatus,
         "FanSpeedStatus": FanSpeedStatus,
         "FanSpeedEnum": FanSpeedEnum,
@@ -80,11 +87,37 @@ class DaikinController:
         devices: List[DaikinDevice],
         config_path: Optional[str] = None,
         discover_timeout: float = 4.0,
+        quick_scan_timeout: float = 2.0,
+        ble_lock_timeout: float = 25.0,
+        connect_timeout: float = 20.0,
+        poll_interval: float = 120.0,
     ):
         self.devices = devices
         self._device_map: Dict[str, DaikinDevice] = {d.id: d for d in devices}
         self._config_path = config_path
         self._discover_timeout = discover_timeout
+        self._quick_scan_timeout = quick_scan_timeout
+        self._ble_lock_timeout = ble_lock_timeout
+        # pymadoka's own connect retry loop has no timeout or max attempts -
+        # if the underlying D-Bus connection to BlueZ dies mid-operation (see
+        # dbus_fast EOFError/"could not shut down socket" failures), it will
+        # retry forever against that same dead connection. Without a bound
+        # here, that hangs madoka.start()/stop() permanently, which - since
+        # this all runs under _ble_lock - would permanently lock out every
+        # Daikin device until the process is restarted.
+        self._connect_timeout = connect_timeout
+        # Only one BLE conversation can happen at a time - the adapter can only
+        # hold one connection per peripheral and pymadoka's discovery cache is
+        # a shared module-level global - so concurrent requests (e.g. from two
+        # browser tabs under the threaded Flask server) must be serialized
+        # here instead of racing each other.
+        self._ble_lock = threading.Lock()
+        # Shared last-known-status cache, kept fresh by a single background
+        # poller plus every action's own result, so browser tabs read cheap
+        # in-memory state instead of each tab triggering its own BLE cycle.
+        self._status_cache: Dict[str, dict] = {}
+        self._status_cache_lock = threading.Lock()
+        self._poll_interval = poll_interval
 
     @classmethod
     def from_sources(cls, config_path: Optional[str] = None):
@@ -169,6 +202,41 @@ class DaikinController:
             return self._status_payload(power, mode, set_point, fan)
 
         return self._run(device, action)
+
+    def get_cached_status(self, device_id: str):
+        device = self._require_device(device_id)
+        if isinstance(device, dict):
+            return device
+
+        with self._status_cache_lock:
+            cached = self._status_cache.get(device_id)
+        if cached is not None:
+            return cached
+
+        # Nothing polled yet (e.g. right after startup) - fall back to one
+        # live read, which also populates the cache via _run() below.
+        return self.get_status(device_id)
+
+    def start_background_polling(self):
+        if not self.devices:
+            return
+
+        def loop():
+            while True:
+                for device in self.devices:
+                    try:
+                        self.get_status(device.id)
+                    except Exception:
+                        # _run() already turns BLE failures into a normal
+                        # {"ok": False, ...} result, but this thread has no
+                        # supervisor to restart it - an unexpected exception
+                        # here must not silently end background polling for
+                        # every device forever.
+                        pass
+                time.sleep(self._poll_interval)
+
+        thread = threading.Thread(target=loop, daemon=True)
+        thread.start()
 
     def set_power(self, device_id: str, on: bool):
         device = self._require_device(device_id)
@@ -268,22 +336,83 @@ class DaikinController:
         except DaikinControllerError as exc:
             return {"ok": False, "id": device.id, "name": device.name, "error": str(exc)}
 
+        if not self._ble_lock.acquire(timeout=self._ble_lock_timeout):
+            return {
+                "ok": False,
+                "id": device.id,
+                "name": device.name,
+                "error": "Daikin control is busy with another request, try again shortly",
+            }
+
         async def runner():
             await lib["force_device_disconnect"](device.address)
-            await lib["discover_devices"](
-                timeout=self._discover_timeout, adapter=device.adapter
+
+            # We already know the address from devices.json, so look for that
+            # one device only instead of pymadoka's discover_devices(), which
+            # always sleeps the full timeout scanning for everything nearby.
+            # find_device_by_address() returns as soon as it sees a match.
+            matched = await lib["BleakScanner"].find_device_by_address(
+                device.address,
+                timeout=self._quick_scan_timeout,
+                adapter=device.adapter,
             )
+            if matched is not None:
+                lib["connection_module"].DISCOVERED_DEVICES_CACHE = [matched]
+            else:
+                cache = await lib["discover_devices"](
+                    timeout=self._discover_timeout, adapter=device.adapter
+                )
+                matched = next(
+                    (d for d in cache if d.address.upper() == device.address.upper()),
+                    None,
+                )
+
             madoka = lib["Controller"](device.address, adapter=device.adapter)
-            await madoka.start()
+            if matched is not None:
+                # pymadoka's own connect loop always burns a wasted first
+                # iteration (just wraps the device we already found) plus a
+                # flat 2s sleep after it. Handing it a pre-built BleakClient
+                # skips straight to the real connect attempt.
+                #
+                # Also skip pymadoka's own on_disconnect callback: it
+                # unconditionally schedules a reconnect (asyncio.create_task)
+                # on every disconnect, including our own deliberate one at
+                # the end of this request - that reconnect attempt races
+                # against our shutdown and is what produces BlueZ's
+                # "Operation already in progress" / "br-connection-canceled"
+                # errors. We manage the connect/disconnect lifecycle
+                # ourselves once per request, so auto-reconnect is unwanted.
+                madoka.connection.client = lib["BleakClient"](
+                    matched,
+                    adapter=device.adapter,
+                    disconnected_callback=lambda _client: None,
+                )
+            await asyncio.wait_for(madoka.start(), timeout=self._connect_timeout)
             try:
                 return await action(madoka, lib)
             finally:
-                await madoka.stop()
+                try:
+                    await asyncio.wait_for(madoka.stop(), timeout=self._connect_timeout)
+                except Exception:
+                    # A stuck/failed disconnect shouldn't clobber a result
+                    # action() already produced successfully - the command
+                    # reached the device either way, and _ble_lock is what
+                    # actually protects the next request from colliding.
+                    pass
 
         try:
             result = asyncio.run(runner())
             result["id"] = device.id
             result["name"] = device.name
+            if result.get("ok"):
+                # Every call funnels through here (status reads and actions
+                # alike), so this single hook keeps the shared cache fresh
+                # without each method having to update it separately. Only
+                # successful results overwrite the cache, so one transient
+                # failure doesn't blank out the last known-good state for
+                # every browser tab.
+                with self._status_cache_lock:
+                    self._status_cache[device.id] = result
             return result
         except Exception as exc:
             return {
@@ -292,3 +421,5 @@ class DaikinController:
                 "name": device.name,
                 "error": str(exc),
             }
+        finally:
+            self._ble_lock.release()

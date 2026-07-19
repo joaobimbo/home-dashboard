@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=Fraunces:opsz,wght@9..144,600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='18') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='19') }}">
 </head>
 <body>
   <div class="dashboard-shell">
@@ -45,11 +45,9 @@
               <div class="ac-row">
                 <button type="button" class="switch ac-power" data-ac-power>Ligar / Desligar</button>
               </div>
-              <div class="ac-setpoint">
-                <span class="cover-cmd" data-ac-temp-step="-1" role="button" tabindex="0">-</span>
-                <span class="ac-setpoint-value" data-ac-setpoint>--&deg;</span>
-                <span class="cover-cmd" data-ac-temp-step="1" role="button" tabindex="0">+</span>
-              </div>
+              <button type="button" class="ac-setpoint" data-ac-setpoint-open>
+                <span class="ac-setpoint-value" data-ac-setpoint>--</span><span class="ac-setpoint-deg">&deg;</span>
+              </button>
               <div class="ac-row ac-row-pickers">
                 <button type="button" class="ghost ac-picker-btn" data-ac-mode-open>Modo: <span data-ac-mode-label>--</span></button>
                 <button type="button" class="ghost ac-picker-btn" data-ac-fan-open>Ventoinha: <span data-ac-fan-label>--</span></button>
@@ -135,6 +133,25 @@
     </div>
   </div>
 
+  <div class="cover-modal" id="ac-setpoint-modal" hidden>
+    <div class="cover-modal-card" role="dialog" aria-modal="true" aria-labelledby="ac-setpoint-modal-title">
+      <h3 id="ac-setpoint-modal-title">Temperatura</h3>
+      <p class="cover-modal-value" id="ac-setpoint-modal-value">22&deg;</p>
+      <input id="ac-setpoint-modal-slider" class="cover-modal-slider" type="range" min="10" max="32" step="1" value="22">
+      <div class="cover-modal-presets" id="ac-setpoint-modal-presets">
+        <span class="cover-cmd" data-ac-setpoint-preset="18" role="button" tabindex="0">18&deg;</span>
+        <span class="cover-cmd" data-ac-setpoint-preset="20" role="button" tabindex="0">20&deg;</span>
+        <span class="cover-cmd" data-ac-setpoint-preset="22" role="button" tabindex="0">22&deg;</span>
+        <span class="cover-cmd" data-ac-setpoint-preset="24" role="button" tabindex="0">24&deg;</span>
+        <span class="cover-cmd" data-ac-setpoint-preset="26" role="button" tabindex="0">26&deg;</span>
+      </div>
+      <div class="cover-modal-actions">
+        <button type="button" class="cover-modal-btn" id="ac-setpoint-modal-cancel">Cancelar</button>
+        <button type="button" class="cover-modal-btn is-primary" id="ac-setpoint-modal-save">Aplicar</button>
+      </div>
+    </div>
+  </div>
+
   <div class="cover-modal" id="ac-mode-modal" hidden>
     <div class="cover-modal-card" role="dialog" aria-modal="true" aria-labelledby="ac-mode-modal-title">
       <h3 id="ac-mode-modal-title">Modo</h3>
@@ -169,6 +186,6 @@
   <script>
     window.__CONFIGURED_DEVICES__ = {{ devices|tojson }};
   </script>
-  <script src="{{ url_for('static', filename='app.js', v='18') }}"></script>
+  <script src="{{ url_for('static', filename='app.js', v='23') }}"></script>
 </body>
 </html>

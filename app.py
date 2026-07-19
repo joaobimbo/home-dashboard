@@ -9,6 +9,7 @@ app = Flask(__name__)
 controller = ShellyController.from_sources()
 scene_store = SceneStore()
 daikin_controller = DaikinController.from_sources()
+daikin_controller.start_background_polling()
 
 
 @app.route("/")
@@ -156,7 +157,10 @@ def daikin_devices():
 
 @app.route("/api/daikin/<device_id>/status")
 def daikin_status(device_id):
-    result = daikin_controller.get_status(device_id)
+    if request.args.get("live") == "1":
+        result = daikin_controller.get_status(device_id)
+    else:
+        result = daikin_controller.get_cached_status(device_id)
     status_code = 200 if result.get("ok") else 400
     return jsonify(result), status_code
 
@@ -208,4 +212,4 @@ def screen_off():
     return {"ok": True}
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5000, threaded=True)

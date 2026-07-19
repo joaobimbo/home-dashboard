@@ -604,48 +604,53 @@ button:hover {
 }
 
 .ac-refresh {
-  padding: 0.3rem 0.5rem;
-  min-height: 32px;
-  min-width: 32px;
-  font-size: 0.95rem;
+  padding: 0.25rem 0.4rem;
+  min-height: 28px;
+  min-width: 28px;
+  font-size: 0.85rem;
 }
 
 .ac-row {
-  margin-top: 0.55rem;
+  margin-top: 0.5rem;
 }
 
 .ac-row .ac-power {
   width: 100%;
-  min-height: 44px;
-  padding: 0.5rem 0.7rem;
+  min-height: 36px;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.85rem;
 }
 
 .ac-setpoint {
-  margin-top: 0.6rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.6rem;
-}
-
-.ac-setpoint-value {
-  font-size: 1.3rem;
+  display: block;
+  width: 100%;
+  margin-top: 0.5rem;
+  padding: 0.3rem 0.6rem;
+  min-height: 36px;
+  border: 1px solid rgba(120, 90, 56, 0.28);
+  border-radius: 10px;
+  background: rgba(241, 229, 209, 0.7);
+  color: var(--text-main);
+  font-size: 1.1rem;
   font-weight: 700;
-  min-width: 3.2ch;
   text-align: center;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .ac-row-pickers {
   display: flex;
-  gap: 0.4rem;
+  gap: 0.35rem;
   flex-wrap: wrap;
 }
 
 .ac-picker-btn {
   flex: 1;
-  min-height: 40px;
-  padding: 0.4rem 0.55rem;
-  font-size: 0.82rem;
+  min-height: 34px;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.76rem;
   white-space: nowrap;
 }
 
