@@ -2,6 +2,7 @@ from flask import Flask, jsonify, render_template, request
 
 from modules.shelly import SceneStore, ShellyController
 from modules.daikin import DaikinController
+from modules.weather import get_weather
 import os
 import subprocess
 
@@ -37,6 +38,13 @@ def status():
             "devices": len(controller.devices),
         }
     )
+
+
+@app.route("/api/weather")
+def weather():
+    result = get_weather()
+    status_code = 200 if result.get("ok") else 400
+    return jsonify(result), status_code
 
 
 @app.route("/api/shelly/devices")

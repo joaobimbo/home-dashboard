@@ -21,6 +21,7 @@
   - Shelly APIs: `/api/shelly/*`
   - Daikin/Madoka APIs: `/api/daikin/*`
   - scenes APIs still exist in backend (`/api/scenes*`) even if UI is currently trimmed.
+  - weather: `/api/weather` — server-side fetch of `wttr.in` (see `modules/weather.py`), cached in-process for 30 minutes so the header widget doesn't hit the external service on every page load/poll. Frontend polls it every 15 minutes (`startWeatherPolling()` in `static/app.js`).
 - Frontend entrypoints: `templates/index.html`, `static/app.js`, `static/style.css`.
 
 ## Shelly module conventions
@@ -49,7 +50,7 @@
   3) empty list (no hardcoded fallback — MAC addresses are household-specific)
 - Pairing is manual/on-demand only: `python modules/daikin/pair.py` (run on the Linux host with Bluetooth hardware). It walks through `bluetoothctl` pairing interactively, then appends the device (id/display_name/room/address/adapter) to `devices.json`.
 - BLE polling and browser polling are decoupled through a shared server-side cache, so opening more tabs never adds BLE traffic. `DaikinController` (`modules/daikin/controller.py`) keeps a `_status_cache` dict (device_id -> last known status), updated by a single background thread (`start_background_polling()`, started once in `app.py` after constructing the controller) that queries each device every `poll_interval` (default 120s) regardless of how many tabs are open, plus every action's own result (all actions funnel through `_run()`, which writes to the cache on every successful call). `GET /api/daikin/<id>/status` serves that cache by default (near-instant, no BLE) and only does a live BLE read on cache-miss (e.g. right after startup) or when called with `?live=1`. The frontend polls this cheap endpoint every 30s per tab (`startAcStatusPolling()` in `static/app.js`, matching Shelly's cadence, skipped while the tab is hidden) — since it's just a cache read, all tabs converge within ~30s of any change instead of drifting for up to 120s. The manual refresh button (`data-ac-refresh`) explicitly passes `?live=1` to force a real BLE read, since a user pressing "refresh" wants ground truth, not a cached value.
-- Exposed controls: power on/off, mode (`auto`/`cool`/`heat`/`dry`/`fan`), single setpoint temperature (applied to both cooling and heating set points), fan speed (`auto`/`low`/`mid`/`high`).
+- Exposed controls: power on/off, mode (`auto`/`cool`/`heat`/`dry`/`fan`), single setpoint temperature (applied to both cooling and heating set points), fan speed (`auto`/`low`/`mid`/`high`). Status payloads also include `current_temp` (actual indoor temperature, from pymadoka's `temperatures` feature, `TemperaturesStatus.indoor`) alongside `setpoint` — every status-producing call funnels through `DaikinController._query_status_payload()`, so all 5 command methods stay in sync automatically.
 
 ## Discovery workflow (important)
 

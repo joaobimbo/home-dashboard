@@ -195,11 +195,7 @@ class DaikinController:
             return device
 
         async def action(madoka, lib):
-            power = await madoka.power_state.query()
-            mode = await madoka.operation_mode.query()
-            set_point = await madoka.set_point.query()
-            fan = await madoka.fan_speed.query()
-            return self._status_payload(power, mode, set_point, fan)
+            return await self._query_status_payload(madoka)
 
         return self._run(device, action)
 
@@ -245,11 +241,7 @@ class DaikinController:
 
         async def action(madoka, lib):
             await madoka.power_state.update(lib["PowerStateStatus"](on))
-            power = await madoka.power_state.query()
-            mode = await madoka.operation_mode.query()
-            set_point = await madoka.set_point.query()
-            fan = await madoka.fan_speed.query()
-            return self._status_payload(power, mode, set_point, fan)
+            return await self._query_status_payload(madoka)
 
         return self._run(device, action)
 
@@ -265,11 +257,7 @@ class DaikinController:
             await madoka.operation_mode.update(
                 lib["OperationModeStatus"](enum_value)
             )
-            power = await madoka.power_state.query()
-            mode_status = await madoka.operation_mode.query()
-            set_point = await madoka.set_point.query()
-            fan = await madoka.fan_speed.query()
-            return self._status_payload(power, mode_status, set_point, fan)
+            return await self._query_status_payload(madoka)
 
         return self._run(device, action)
 
@@ -285,11 +273,7 @@ class DaikinController:
             await madoka.set_point.update(
                 lib["SetPointStatus"](target, target)
             )
-            power = await madoka.power_state.query()
-            mode = await madoka.operation_mode.query()
-            set_point = await madoka.set_point.query()
-            fan = await madoka.fan_speed.query()
-            return self._status_payload(power, mode, set_point, fan)
+            return await self._query_status_payload(madoka)
 
         return self._run(device, action)
 
@@ -305,11 +289,7 @@ class DaikinController:
             await madoka.fan_speed.update(
                 lib["FanSpeedStatus"](enum_value, enum_value)
             )
-            power = await madoka.power_state.query()
-            mode = await madoka.operation_mode.query()
-            set_point = await madoka.set_point.query()
-            fan = await madoka.fan_speed.query()
-            return self._status_payload(power, mode, set_point, fan)
+            return await self._query_status_payload(madoka)
 
         return self._run(device, action)
 
@@ -321,12 +301,21 @@ class DaikinController:
             return {"ok": False, "error": "Unknown device"}
         return device
 
-    def _status_payload(self, power, mode, set_point, fan):
+    async def _query_status_payload(self, madoka):
+        power = await madoka.power_state.query()
+        mode = await madoka.operation_mode.query()
+        set_point = await madoka.set_point.query()
+        fan = await madoka.fan_speed.query()
+        temps = await madoka.temperatures.query()
+        return self._status_payload(power, mode, set_point, fan, temps)
+
+    def _status_payload(self, power, mode, set_point, fan, temps):
         return {
             "ok": True,
             "power": bool(power.turn_on),
             "mode": str(mode.operation_mode).lower(),
             "setpoint": set_point.cooling_set_point,
+            "current_temp": temps.indoor,
             "fan_speed": str(fan.cooling_fan_speed).lower(),
         }
 

@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=Fraunces:opsz,wght@9..144,600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='19') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='22') }}">
 </head>
 <body>
   <div class="dashboard-shell">
@@ -19,9 +19,9 @@
           <p class="subtitle">Painel Shelly em tempo real para toda a casa.</p>
         </div>
         <div class="hero-widgets">
-          <div class="widget weather">
-            <span class="weather-temp">22&deg;</span>
-            <span class="weather-label">Poucas nuvens</span>
+          <div class="widget weather" id="weather-widget">
+            <span class="weather-temp" data-weather-temp>--&deg;</span>
+            <span class="weather-label" data-weather-label>--</span>
           </div>
           <div class="widget clock" id="clock-widget">--:--</div>
         </div>
@@ -39,18 +39,23 @@
             <div class="ac-card" data-ac-id="{{ ac.id }}" data-room="{{ ac.room }}">
               <div class="ac-head">
                 <h3>{{ ac.name }}</h3>
-                <span class="ac-status" data-ac-status>--</span>
                 <span class="cover-cmd ac-refresh" data-ac-refresh role="button" tabindex="0" title="Atualizar estado">&#8635;</span>
               </div>
-              <div class="ac-row">
-                <button type="button" class="switch ac-power" data-ac-power>Ligar / Desligar</button>
-              </div>
-              <button type="button" class="ac-setpoint" data-ac-setpoint-open>
-                <span class="ac-setpoint-value" data-ac-setpoint>--</span><span class="ac-setpoint-deg">&deg;</span>
-              </button>
-              <div class="ac-row ac-row-pickers">
-                <button type="button" class="ghost ac-picker-btn" data-ac-mode-open>Modo: <span data-ac-mode-label>--</span></button>
-                <button type="button" class="ghost ac-picker-btn" data-ac-fan-open>Ventoinha: <span data-ac-fan-label>--</span></button>
+              <div class="cover-controls ac-controls" aria-label="Controlos do AC">
+                <button type="button" class="cover-cmd ac-power-cmd" data-ac-power title="Ligar / Desligar">Ligar</button>
+                <button type="button" class="cover-cmd ac-setpoint-cmd" data-ac-setpoint-open title="Atual / Definida">
+                  <span class="ac-current-temp" data-ac-current-temp>--</span>&deg;<span class="ac-setpoint-sep">/</span><span data-ac-setpoint>--</span>&deg;
+                </button>
+                <button type="button" class="cover-cmd ac-mode-cmd" data-ac-mode-open title="Modo">
+                  <span data-ac-mode-label>--</span>
+                </button>
+                <button type="button" class="cover-cmd ac-fan-cmd" data-ac-fan-open title="Ventoinha">
+                  <span class="fan-bars" data-ac-fan-bars>
+                    <span class="fan-bar fan-bar-1"></span>
+                    <span class="fan-bar fan-bar-2"></span>
+                    <span class="fan-bar fan-bar-3"></span>
+                  </span>
+                </button>
               </div>
             </div>
             {% endfor %}
@@ -186,6 +191,6 @@
   <script>
     window.__CONFIGURED_DEVICES__ = {{ devices|tojson }};
   </script>
-  <script src="{{ url_for('static', filename='app.js', v='23') }}"></script>
+  <script src="{{ url_for('static', filename='app.js', v='26') }}"></script>
 </body>
 </html>

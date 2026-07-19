@@ -2,6 +2,9 @@
   var deviceList = document.getElementById("device-list");
   var acList = document.getElementById("ac-list");
   var clockWidget = document.getElementById("clock-widget");
+  var weatherTempNode = document.querySelector("[data-weather-temp]");
+  var weatherLabelNode = document.querySelector("[data-weather-label]");
+  var weatherTimer = null;
   var coverModal = document.getElementById("cover-modal");
   var coverModalValue = document.getElementById("cover-modal-value");
   var coverModalSlider = document.getElementById("cover-modal-slider");
@@ -407,8 +410,8 @@
     auto: "Auto",
     cool: "Frio",
     heat: "Calor",
-    dry: "Desumidificar",
-    fan: "Ventilação"
+    dry: "Seco",
+    fan: "Vent."
   };
 
   var acFanLabels = {
@@ -419,18 +422,15 @@
   };
 
   function paintAcCard(card, info) {
-    var statusNode = card.querySelector("[data-ac-status]");
     var setpointNode = card.querySelector("[data-ac-setpoint]");
+    var currentTempNode = card.querySelector("[data-ac-current-temp]");
     var powerBtn = card.querySelector("[data-ac-power]");
     var modeLabelNode = card.querySelector("[data-ac-mode-label]");
-    var fanLabelNode = card.querySelector("[data-ac-fan-label]");
+    var fanBtn = card.querySelector("[data-ac-fan-open]");
 
     removeClasses(card, ["is-on", "is-off", "is-error"]);
 
     if (!info || !info.ok) {
-      if (statusNode) {
-        statusNode.textContent = "Erro";
-      }
       card.classList.add("is-error");
       return;
     }
@@ -441,17 +441,11 @@
 
     if (info.power) {
       card.classList.add("is-on");
-      if (statusNode) {
-        statusNode.textContent = (acModeLabels[info.mode] || info.mode) + " · Ligado";
-      }
       if (powerBtn) {
         powerBtn.textContent = "Desligar";
       }
     } else {
       card.classList.add("is-off");
-      if (statusNode) {
-        statusNode.textContent = "Desligado";
-      }
       if (powerBtn) {
         powerBtn.textContent = "Ligar";
       }
@@ -461,13 +455,32 @@
       setpointNode.textContent = String(info.setpoint);
     }
 
+    if (currentTempNode && typeof info.current_temp === "number") {
+      currentTempNode.textContent = String(info.current_temp);
+    }
+
     if (modeLabelNode) {
       modeLabelNode.textContent = acModeLabels[info.mode] || info.mode || "--";
     }
 
-    if (fanLabelNode) {
-      fanLabelNode.textContent = acFanLabels[info.fan_speed] || info.fan_speed || "--";
+    if (fanBtn) {
+      fanBtn.title = "Ventoinha: " + (acFanLabels[info.fan_speed] || info.fan_speed || "--");
     }
+    paintFanBars(card, info.fan_speed);
+  }
+
+  function paintFanBars(card, level) {
+    var bars = card.querySelectorAll(".fan-bar");
+    var activeCount = { low: 1, mid: 2, high: 3 }[level] || 0;
+    var isAuto = level === "auto";
+    eachNode(bars, function (bar, index) {
+      removeClasses(bar, ["is-active", "is-auto"]);
+      if (isAuto) {
+        bar.classList.add("is-auto");
+      } else if (index < activeCount) {
+        bar.classList.add("is-active");
+      }
+    });
   }
 
   function setAcBusy(card, busy) {
@@ -789,6 +802,35 @@
     clockWidget.textContent = hh + ":" + mm;
   }
 
+  function refreshWeather() {
+    if (!weatherTempNode && !weatherLabelNode) {
+      return;
+    }
+    requestJSON("GET", "/api/weather", null, function (_err, result) {
+      if (_err || !result || !result.ok) {
+        return;
+      }
+      if (weatherTempNode) {
+        weatherTempNode.textContent = String(result.temp_c) + "°";
+      }
+      if (weatherLabelNode) {
+        weatherLabelNode.textContent = result.condition;
+      }
+    });
+  }
+
+  function startWeatherPolling() {
+    if (weatherTimer) {
+      clearInterval(weatherTimer);
+    }
+    weatherTimer = setInterval(function () {
+      if (isPageHidden()) {
+        return;
+      }
+      refreshWeather();
+    }, 900000);
+  }
+
   function startStatusPolling() {
     if (statusTimer) {
       clearInterval(statusTimer);
@@ -976,4 +1018,6 @@
   startStatusPolling();
   refreshAllAcStatuses();
   startAcStatusPolling();
+  refreshWeather();
+  startWeatherPolling();
 })();
