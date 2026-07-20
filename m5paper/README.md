@@ -27,6 +27,29 @@ at all, paste it into the code editor instead and use **Run Always** — UIFlow2
 writes whatever you deploy that way to `main.py`, which auto-runs at boot. Both
 paths work; pick whichever fits how you want to use the device.
 
+## Debugging over serial
+
+The app logs its progress with `print()` — connect over USB, open the UIFlow2
+IDE's WebTerminal (or any serial monitor at the device's baud rate), and
+re-run the app from the app list. You should see lines like:
+
+```
+[hdashboard] hdashboard.py: starting
+[hdashboard] setup(): calling hw_init()
+[hdashboard] setup(): hw_init() done, WIDTH=960 HEIGHT=540
+[hdashboard] setup(): fetching shelly devices from http://192.168.1.50:5000
+[hdashboard] setup(): shelly online=True devices=7
+...
+[hdashboard] redraw(full=True) tab=ac modal=None
+[hdashboard] redraw() done, 23 hit regions
+```
+
+If it crashes, the exception handler now prints a full traceback
+(`sys.print_exception(e)`) before attempting the on-screen error display —
+so even if on-screen error rendering isn't working, the real cause (file,
+line, exception type) is visible over serial. Set `DEBUG = False` near the top
+of the file once things are working, to quiet the log.
+
 ## Confirmed on real hardware so far
 
 - **HTTP client is `requests2`, not `urequests`.** The first version of this
@@ -41,6 +64,14 @@ paths work; pick whichever fits how you want to use the device.
   Flask backend's own response times (fast for Shelly, ~25s worst case for
   Daikin), except a *fully unreachable* server, which could hang a request
   with no way for this app to detect or cancel it.
+- **`Touch` is accessed as `M5.Touch.*`, not `from M5 import Touch`.** Only
+  `Lcd`'s bare-import form is actually confirmed by a real M5Stack example;
+  `Touch` was an unconfirmed extrapolation in an earlier version, and if wrong
+  would have thrown an `ImportError` at the top of the file — before `setup()`
+  even runs, before the try/except is reached — which looks exactly like a
+  blank screen with no error. Reverted to the qualified, docs-confirmed form
+  to close off that risk, whether or not it was the actual cause of a blank
+  screen you saw.
 
 ## One thing still worth watching for
 

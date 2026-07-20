@@ -12,11 +12,27 @@
 # utility.print_error_msg instead of silently dying with no serial console
 # attached.
 
+import sys
 import time
 
 import M5
 import requests2
-from M5 import Lcd, Touch
+from M5 import Lcd
+
+# NOTE: only Lcd is imported this way - that's confirmed directly from
+# M5Stack's own apps/helloworld.py example. `M5.Touch` (qualified, not
+# `from M5 import Touch`) is used below instead, since that's the form
+# actually confirmed by the official docs - importing a name from M5 that
+# isn't really exported that way would throw here, before setup() even
+# starts, which would look exactly like a blank screen with no on-screen
+# error (see DEBUG below for why: this line runs before the try/except).
+
+DEBUG = True
+
+
+def log(msg):
+    if DEBUG:
+        print("[hdashboard] " + msg)
 
 
 # ============================================================
@@ -42,14 +58,16 @@ TICK_MS = 100
 # ============================================================
 # Hardware - the only section touching M5Unified/UIFlow2 APIs directly.
 #
-# `from M5 import Lcd, Touch` + Lcd.setCursor()/.print() for text match a real
+# `from M5 import Lcd` + Lcd.setCursor()/.print() for text match a real
 # M5Stack-authored example (apps/helloworld.py), not just doc summaries.
 # Lcd.setEpdMode() controls e-paper refresh quality/speed - there's no separate
 # flush/push call, draws update the panel directly under whichever mode is
-# currently set. Touch is Touch.getCount() + Touch.getDetail(0) (an 11-element
-# TUPLE, not an object - index 5 is wasPressed) plus separate
-# Touch.getX()/getY() calls for coordinates (confirmed via the official UIFlow2
-# MicroPython docs, uiflow-micropython.readthedocs.io).
+# currently set. Touch is M5.Touch.getCount() + M5.Touch.getDetail(0) (an
+# 11-element TUPLE, not an object - index 5 is wasPressed) plus separate
+# M5.Touch.getX()/getY() calls for coordinates (confirmed via the official
+# UIFlow2 MicroPython docs, uiflow-micropython.readthedocs.io - kept
+# M5.-qualified rather than `from M5 import Touch` since only Lcd's bare-import
+# form is actually confirmed by a real example).
 #
 # Still unverified: whether individual draw calls each visibly flash the panel
 # during a redraw, or whether some batching exists to make a frame atomic - see
@@ -106,11 +124,11 @@ def begin_frame(full=False):
 def poll_touch():
     """Return (x, y) of a new touch press (down-edge only), or None."""
     M5.update()
-    if Touch.getCount() > 0:
-        detail = Touch.getDetail(0)
+    if M5.Touch.getCount() > 0:
+        detail = M5.Touch.getDetail(0)
         was_pressed = detail[5]  # wasPressed
         if was_pressed:
-            return Touch.getX(), Touch.getY()
+            return M5.Touch.getX(), M5.Touch.getY()
     return None
 
 
@@ -145,6 +163,7 @@ def _get(path):
     try:
         resp = requests2.get(SERVER_URL + path)
     except Exception as exc:
+        log("GET %s FAILED: %s" % (path, exc))
         return {"ok": False, "error": str(exc)}
     try:
         data = resp.json()
@@ -157,6 +176,7 @@ def _post(path, body):
     try:
         resp = requests2.post(SERVER_URL + path, json=body, headers={"Content-Type": "application/json"})
     except Exception as exc:
+        log("POST %s FAILED: %s" % (path, exc))
         return {"ok": False, "error": str(exc)}
     try:
         data = resp.json()
@@ -661,6 +681,7 @@ def redraw(full=False):
     global partial_redraws_since_full
     if not full and partial_redraws_since_full >= FULL_REFRESH_EVERY:
         full = True
+    log("redraw(full=%s) tab=%s modal=%s" % (full, app.active_tab, app.active_modal))
     begin_frame(full=full)
     hw_clear()
     regions = []
@@ -672,6 +693,7 @@ def redraw(full=False):
         regions += draw_body(app)
     regions += draw_footer(app)
     app.hit_regions = regions
+    log("redraw() done, %d hit regions" % len(regions))
     partial_redraws_since_full = 0 if full else partial_redraws_since_full + 1
 
 
@@ -792,14 +814,27 @@ def handle_action(action):
 def setup():
     global app, last_shelly, last_ac, last_weather
 
+    log("setup(): calling hw_init()")
     hw_init()
+    log("setup(): hw_init() done, WIDTH=%s HEIGHT=%s" % (WIDTH, HEIGHT))
     app = AppState()
 
+    log("setup(): fetching shelly devices from %s" % SERVER_URL)
     app.refresh_shelly()
+    log("setup(): shelly online=%s devices=%d" % (app.online, len(app.shelly_devices)))
+
+    log("setup(): fetching daikin devices")
     app.refresh_daikin()
+    log("setup(): daikin online=%s devices=%d" % (app.online, len(app.daikin_devices)))
+
+    log("setup(): fetching weather")
     app.refresh_weather()
+    log("setup(): weather=%s" % (app.weather,))
+
     app.ensure_active_tab()
+    log("setup(): active_tab=%s available_tabs=%s" % (app.active_tab, app.available_tabs()))
     redraw(full=True)
+    log("setup(): done")
 
     now = time.ticks_ms()
     last_shelly = now
@@ -812,7 +847,9 @@ def loop():
 
     touch = poll_touch()
     if touch:
+        log("loop(): touch at %s" % (touch,))
         action = hit_test(touch[0], touch[1], app.hit_regions)
+        log("loop(): action=%s" % (action,))
         handle_action(action)
         time.sleep_ms(200)  # debounce: ignore rapid repeat taps
 
@@ -836,14 +873,17 @@ def loop():
     time.sleep_ms(TICK_MS)
 
 
+log("hdashboard.py: starting")
 try:
     setup()
     while True:
         loop()
 except (Exception, KeyboardInterrupt) as e:
+    print("[hdashboard] CRASHED - full traceback follows:")
+    sys.print_exception(e)
     try:
         from utility import print_error_msg
 
         print_error_msg(e)
     except ImportError:
-        print("please update to latest firmware")
+        print("[hdashboard] no utility.print_error_msg available on this firmware")
