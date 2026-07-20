@@ -83,6 +83,22 @@ Also: the clock reads the device's RTC, which UIFlow2 normally syncs via NTP at
 boot. If the clock shows a wrong/zero time, that's a device time-sync issue,
 not something this app handles.
 
+## Dimmer tiles: two explicit buttons, not one tile + a tiny corner
+
+A dimmer ("light" component) tile used to make the *whole tile* an on/off
+toggle, with only a small 50×26 corner carved out for brightness — easy to
+miss, and conceptually one big region pretending to be two different actions.
+Now it's two clearly bordered, roughly equal-width buttons side by side below
+the name: **On/Off** on the left, **brightness%** (opens the preset picker) on
+the right, plus the icon itself also toggles power. Plain switches/relays
+(no brightness) still use the whole-tile-toggles pattern, since there's only
+one action there.
+
+Also bumped the gap between the device name and whatever's below it (state
+text, or these buttons) from a cramped ~4px to a clearer ~12px across all
+three tile types (cover/light/switch) — the name and the on/off indicator
+were sitting close enough to read as one crowded line.
+
 ## State icons
 
 Lights, switches, blinds, and the AC power button all show a square icon

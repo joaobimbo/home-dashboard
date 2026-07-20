@@ -608,7 +608,7 @@ def draw_device_tile(rect, device, busy):
             state = device.get("state")
             pct = 100 if state == "open" else 0 if state == "closed" else 50
             state_text = str(state or "?")
-        draw_text(state_text, x + 8, y + 26, size=2)
+        draw_text(state_text, x + 8, y + 32, size=2)
         _draw_blind_icon(icon_x, icon_y, icon_size, pct)
 
         btn_w = (icon_x - x) // 3
@@ -629,15 +629,29 @@ def draw_device_tile(rect, device, busy):
 
         is_on = device.get("state") == "on"
         brightness = device.get("brightness")
-        state_text = "%s%%" % brightness if isinstance(brightness, int) else ("On" if is_on else "Off")
-        draw_text(state_text, x + 8, y + 26, size=2)
         _draw_state_icon(icon_x, icon_y, icon_size, 0 if is_on else 1)  # white=on, black=off, per user preference
 
-        pct_rect = (x + 8, y + h - 30, 50, 26)
-        draw_text("%", pct_rect[0] + 18, pct_rect[1] + 4, size=2)
+        # Two explicit side-by-side buttons - on/off and brightness% - rather
+        # than the whole tile toggling power with only a tiny corner for
+        # brightness. btn_top leaves a clear gap below the name instead of
+        # sitting right under it.
+        btn_top = y + 34
+        btn_h = max(24, (y + h - 8) - btn_top)
+        col_w = (icon_x - 8 - x) // 2
+
+        onoff_label = "On" if is_on else "Off"
+        pct_label = "%s%%" % brightness if isinstance(brightness, int) else "--"
+
+        draw_rect(x + 4, btn_top, col_w - 4, btn_h, BLACK)
+        draw_text(onoff_label, x + 12, _text_center_y(btn_top, btn_h, 2), size=2)
+
+        draw_rect(x + col_w + 4, btn_top, col_w - 4, btn_h, BLACK)
+        draw_text(pct_label, x + col_w + 12, _text_center_y(btn_top, btn_h, 2), size=2)
+
         next_command = "off" if is_on else "on"
-        regions.append(((x, y, w, h), {"kind": "light_power", "device_id": device_id, "command": next_command}))
-        regions.append((pct_rect, {"kind": "open_modal", "type": "brightness", "device_id": device_id}))
+        regions.append(((x, btn_top, col_w, btn_h), {"kind": "light_power", "device_id": device_id, "command": next_command}))
+        regions.append(((x + col_w, btn_top, col_w, btn_h), {"kind": "open_modal", "type": "brightness", "device_id": device_id}))
+        regions.append(((icon_x, icon_y, icon_size, icon_size), {"kind": "light_power", "device_id": device_id, "command": next_command}))
 
     else:  # switch/relay
         icon_size = TILE_ICON_SIZE
@@ -646,7 +660,7 @@ def draw_device_tile(rect, device, busy):
 
         is_on = device.get("state") == "on"
         state_text = "On" if is_on else "Off"
-        draw_text(state_text, x + 8, y + 26, size=2)
+        draw_text(state_text, x + 8, y + 32, size=2)
         _draw_state_icon(icon_x, icon_y, icon_size, 0 if is_on else 1)  # white=on, black=off, per user preference
         regions.append(((x, y, w, h), {"kind": "switch_toggle", "device_id": device_id}))
 
