@@ -29,9 +29,10 @@ paths work; pick whichever fits how you want to use the device.
 
 ## Debugging over serial
 
-The app logs its progress with `print()` — connect over USB, open the UIFlow2
-IDE's WebTerminal (or any serial monitor at the device's baud rate), and
-re-run the app from the app list. You should see lines like:
+Set `DEBUG = True` near the top of the file for an active debugging session:
+connect over USB, open the UIFlow2 IDE's WebTerminal (or any serial monitor at
+the device's baud rate), and re-run the app from the app list. You should see
+lines like:
 
 ```
 [hdashboard] hdashboard.py: starting
@@ -44,11 +45,21 @@ re-run the app from the app list. You should see lines like:
 [hdashboard] redraw() done, 23 hit regions
 ```
 
-If it crashes, the exception handler now prints a full traceback
+If it crashes, the exception handler prints a full traceback
 (`sys.print_exception(e)`) before attempting the on-screen error display —
 so even if on-screen error rendering isn't working, the real cause (file,
-line, exception type) is visible over serial. Set `DEBUG = False` near the top
-of the file once things are working, to quiet the log.
+line, exception type) is visible over serial.
+
+**`DEBUG` defaults to `False` — leave it that way for normal use.** This isn't
+just about log noise: `print()` over USB serial can block (or badly stall)
+once its internal buffer fills up if nothing's actually reading the other
+end, a known MicroPython/USB-CDC gotcha. With `DEBUG = True`, every
+redraw/touch/network call prints — so disconnecting (or just closing the
+serial monitor) partway through a session starves that buffer, and the whole
+app slows to a crawl. This is exactly what "snappy for a minute, then slow
+again" turned out to be — not an e-paper or network issue, just unread serial
+output backing up. Only flip `DEBUG` on for an active session with a monitor
+actually open, and back off when you unplug.
 
 ## Confirmed on real hardware so far
 

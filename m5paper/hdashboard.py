@@ -27,7 +27,15 @@ from M5 import Lcd
 # starts, which would look exactly like a blank screen with no on-screen
 # error (see DEBUG below for why: this line runs before the try/except).
 
-DEBUG = True
+# Default False: print() over USB serial can block (or badly stall) once its
+# internal buffer fills up if nothing's actually reading the other end - a
+# known MicroPython/USB-CDC gotcha. With DEBUG on, every redraw/touch/network
+# call prints, so unplugging (or just closing the serial monitor) part way
+# through a session starves the buffer and the whole app slows to a crawl -
+# not an e-paper or network issue, just unread serial output backing up. Only
+# flip this to True for an active debugging session with a serial monitor
+# open, and back to False afterwards.
+DEBUG = False
 
 
 def log(msg):
