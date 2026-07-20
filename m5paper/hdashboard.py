@@ -43,9 +43,15 @@ def log(msg):
 # (find it from what `python app.py` prints on startup, or `hostname -I` on the host).
 SERVER_URL = "http://192.168.1.50:5000"
 
-# Polling cadence, in milliseconds. Matches static/app.js's cadence on the web dashboard.
-SHELLY_POLL_MS = 30000
-AC_POLL_MS = 30000
+# Weather polling cadence, in milliseconds - the only thing polled on a timer.
+# Shelly/AC device state is deliberately NOT polled in the background: e-paper
+# refreshes are visible and somewhat costly, and this is a battery-conscious
+# device, not a screen meant to be constantly repainting. Device state is
+# fetched only on tab switch (which doubles as a manual "pull to refresh" -
+# even re-tapping the already-active tab re-fetches it) and patched directly
+# from each action's own response (every Shelly/Daikin action endpoint already
+# returns the device's new state - no need to re-fetch the whole list after
+# your own action).
 WEATHER_POLL_MS = 900000
 
 # Force a full (flash) e-paper refresh every N partial refreshes, to clear ghosting.
@@ -254,13 +260,15 @@ TAB_COVERS = "covers"
 
 
 # ============================================================
-# App state + change detection.
+# App state.
 #
-# Change detection matters here specifically because e-paper redraws are slow
-# and visibly flicker - refresh_shelly()/refresh_daikin() return True only when
-# something in the fetched data actually differs from the last poll, so the main
-# loop can skip repainting (and skip the panel refresh entirely) on an unchanged
-# poll tick.
+# Deliberately no background-polling change detection here: device state is
+# refreshed only on tab switch (a full re-fetch of that tab's devices) and
+# patched directly from each action's own response afterwards - see
+# patch_shelly_device()/patch_daikin_device() below. Every Shelly/Daikin action
+# endpoint already returns the device's new state in its response, so there's
+# never a need to re-fetch the whole list just to see the result of your own
+# action.
 # ============================================================
 
 
@@ -275,8 +283,6 @@ class AppState:
         self.busy_ids = set()
         self.page = 0
         self.hit_regions = []
-        self._last_shelly_snapshot = {}
-        self._last_daikin_snapshot = {}
 
     # --- tabs ---------------------------------------------------------------
 
@@ -304,17 +310,17 @@ class AppState:
             return [d for d in self.shelly_devices if d.get("component") != "cover"]
         return []
 
-    # --- refresh + change detection -----------------------------------------
+    # --- refresh (tab-switch-triggered, never on a timer) -------------------
 
     def refresh_shelly(self):
         configured = get_shelly_configured()
         if isinstance(configured, dict) and configured.get("ok") is False:
             self.online = False
-            return False
+            return
         live = get_shelly_devices()
         if isinstance(live, dict) and live.get("ok") is False:
             self.online = False
-            return False
+            return
 
         live_by_id = dict((d["id"], d) for d in live)
         merged = []
@@ -325,13 +331,12 @@ class AppState:
 
         self.shelly_devices = merged
         self.online = True
-        return self._diff_snapshot("_last_shelly_snapshot", merged)
 
     def refresh_daikin(self, live=False):
         configured = get_daikin_devices()
         if isinstance(configured, dict) and configured.get("ok") is False:
             self.online = False
-            return False
+            return
 
         merged = []
         for cfg in configured:
@@ -343,7 +348,6 @@ class AppState:
 
         self.daikin_devices = merged
         self.online = True
-        return self._diff_snapshot("_last_daikin_snapshot", merged)
 
     def refresh_weather(self):
         result = get_weather()
@@ -352,11 +356,25 @@ class AppState:
             return True
         return False
 
-    def _diff_snapshot(self, attr, rows):
-        snapshot = dict((r["id"], _stable_repr(r)) for r in rows)
-        changed = snapshot != getattr(self, attr)
-        setattr(self, attr, snapshot)
-        return changed
+    # --- patch a single device from its own action's response ---------------
+
+    def patch_shelly_device(self, response):
+        if not response.get("ok"):
+            log("shelly action failed: %s" % response.get("error"))
+            return
+        for d in self.shelly_devices:
+            if d["id"] == response.get("id"):
+                d.update(response)
+                return
+
+    def patch_daikin_device(self, response):
+        if not response.get("ok"):
+            log("daikin action failed: %s" % response.get("error"))
+            return
+        for d in self.daikin_devices:
+            if d["id"] == response.get("id"):
+                d.update(response)
+                return
 
     # --- busy tracking (mirrors static/app.js's is-busy class) --------------
 
@@ -368,10 +386,6 @@ class AppState:
 
     def is_busy(self, device_id):
         return device_id in self.busy_ids
-
-
-def _stable_repr(row):
-    return tuple(sorted(row.items()))
 
 
 # ============================================================
@@ -514,8 +528,21 @@ def draw_device_grid(app, devices):
     return regions
 
 
+def _draw_state_icon(icon_x, icon_y, icon_size, fill_fraction):
+    """A square gauge: fills black from the bottom up by fill_fraction (0-1).
+    fill_fraction=1 draws a fully filled (black) square, 0 a fully empty
+    (white/outline-only) one - used for on/off (0 or 1) and cover position
+    (0-1) alike."""
+    fill_h = int(icon_size * fill_fraction)
+    fill_rect(icon_x, icon_y, icon_size, icon_size, WHITE)
+    if fill_h > 0:
+        fill_rect(icon_x, icon_y + icon_size - fill_h, icon_size, fill_h, BLACK)
+    draw_rect(icon_x, icon_y, icon_size, icon_size, BLACK)
+
+
 def draw_device_tile(rect, device, busy):
     x, y, w, h = rect
+    fill_rect(x, y, w, h, WHITE)
     draw_rect(x, y, w, h, BLACK)
     name = device.get("display_name") or device.get("name") or device["id"]
     draw_text(name, x + 8, y + 8, size=1)
@@ -526,39 +553,54 @@ def draw_device_tile(rect, device, busy):
 
     component = device.get("component")
     regions = []
+    device_id = device["id"]
+
+    icon_size = h - 20
+    icon_x = x + w - icon_size - 10
+    icon_y = y + (h - icon_size) // 2
 
     if component == "cover":
         position = device.get("position")
-        state_text = "%s%%" % position if isinstance(position, int) else str(device.get("state", "?"))
+        if isinstance(position, int):
+            pct = position
+            state_text = "%s%%" % position
+        else:
+            state = device.get("state")
+            pct = 100 if state == "open" else 0 if state == "closed" else 50
+            state_text = str(state or "?")
         draw_text(state_text, x + 8, y + 28, size=2)
+        _draw_state_icon(icon_x, icon_y, icon_size, pct / 100)
 
-        btn_w = w // 3
+        btn_w = (icon_x - x) // 3
         btn_y = y + h - 28
         draw_text("Up", x + 4, btn_y, size=1)
         draw_text("Stop", x + btn_w + 4, btn_y, size=1)
         draw_text("Down", x + 2 * btn_w + 4, btn_y, size=1)
-        device_id = device["id"]
         regions.append(((x, btn_y - 4, btn_w, 24), {"kind": "cover_cmd", "device_id": device_id, "command": "open"}))
         regions.append(((x + btn_w, btn_y - 4, btn_w, 24), {"kind": "cover_cmd", "device_id": device_id, "command": "stop"}))
         regions.append(((x + 2 * btn_w, btn_y - 4, btn_w, 24), {"kind": "cover_cmd", "device_id": device_id, "command": "close"}))
-        regions.append(((x, y, w, h - 32), {"kind": "open_modal", "type": "position", "device_id": device_id}))
+        regions.append(((x, y, icon_x - x, h - 32), {"kind": "open_modal", "type": "position", "device_id": device_id}))
+        regions.append(((icon_x, icon_y, icon_size, icon_size), {"kind": "open_modal", "type": "position", "device_id": device_id}))
 
     elif component == "light":
+        is_on = device.get("state") == "on"
         brightness = device.get("brightness")
-        state_text = "%s%%" % brightness if isinstance(brightness, int) else str(device.get("state", "?"))
+        state_text = "%s%%" % brightness if isinstance(brightness, int) else ("On" if is_on else "Off")
         draw_text(state_text, x + 8, y + 28, size=2)
-        next_command = "off" if device.get("state") == "on" else "on"
-        device_id = device["id"]
-        pct_rect = (x + w - 50, y + h - 28, 46, 24)
-        draw_text("%", pct_rect[0] + 14, pct_rect[1] + 2, size=1)
+        _draw_state_icon(icon_x, icon_y, icon_size, 1 if is_on else 0)
+
+        pct_rect = (x + 8, y + h - 26, 50, 22)
+        draw_text("%", pct_rect[0] + 18, pct_rect[1] + 2, size=1)
+        next_command = "off" if is_on else "on"
+        regions.append(((x, y, w, h), {"kind": "light_power", "device_id": device_id, "command": next_command}))
         regions.append((pct_rect, {"kind": "open_modal", "type": "brightness", "device_id": device_id}))
-        body = (x, y, w - 50, h)
-        regions.append((body, {"kind": "light_power", "device_id": device_id, "command": next_command}))
 
     else:  # switch/relay
-        state_text = str(device.get("state", "?"))
+        is_on = device.get("state") == "on"
+        state_text = "On" if is_on else "Off"
         draw_text(state_text, x + 8, y + 28, size=2)
-        regions.append(((x, y, w, h), {"kind": "switch_toggle", "device_id": device["id"]}))
+        _draw_state_icon(icon_x, icon_y, icon_size, 1 if is_on else 0)
+        regions.append(((x, y, w, h), {"kind": "switch_toggle", "device_id": device_id}))
 
     return regions
 
@@ -574,18 +616,29 @@ def draw_ac_list(app):
 
 def draw_ac_row(rect, device, busy):
     x, y, w, h = rect
+    fill_rect(x, y, w, h, WHITE)
     draw_rect(x, y, w, h, BLACK)
     name = device.get("display_name") or device.get("name") or device["id"]
     draw_text(name, x + 8, y + 6, size=1)
+    draw_text("Refresh", x + w - 60, y + 6, size=1)
+    device_id = device["id"]
 
     if busy:
         draw_text("... (BLE call in progress, ~10s)", x + 8, y + h // 2 - 8, size=1)
-        return []
+        return [((x + w - 70, y, 70, 24), {"kind": "ac_live_refresh", "device_id": device_id})]
 
-    device_id = device["id"]
     power = device.get("power")
-    power_label = "On" if power else "Off"
-    next_state = "off" if power else "on"
+    is_on = bool(power)
+    next_state = "off" if is_on else "on"
+
+    # Big power icon, left side, spans nearly the full row height - the main
+    # on/off indicator and tap target, not a small text button.
+    icon_size = h - 20
+    icon_x = x + 10
+    icon_y = y + (h - icon_size) // 2
+    _draw_state_icon(icon_x, icon_y, icon_size, 1 if is_on else 0)
+
+    info_x = icon_x + icon_size + 14
 
     setpoint = device.get("setpoint")
     current = device.get("current_temp")
@@ -593,18 +646,22 @@ def draw_ac_row(rect, device, busy):
     mode_label = MODE_LABELS.get(device.get("mode"), "--")
     fan_label = FAN_LABELS.get(device.get("fan_speed"), "--")
 
-    col_w = w // 4
-    draw_text(power_label, x + 8, y + h - 28, size=2)
-    draw_text(temps, x + col_w + 8, y + h - 28, size=1)
-    draw_text(mode_label, x + 2 * col_w + 8, y + h - 28, size=1)
-    draw_text(fan_label, x + 3 * col_w + 8, y + h - 28, size=1)
-    draw_text("Refresh", x + w - 60, y + 6, size=1)
+    draw_text(temps, info_x, y + 26, size=2)
+    draw_text("Mode: " + mode_label, info_x, y + 50, size=1)
+    draw_text("Fan: " + fan_label, info_x, y + 66, size=1)
+
+    btn_w = (x + w - info_x) // 3
+    btn_h = 30
+    btn_y = y + h - btn_h - 6
+    draw_text("Set", info_x + 8, btn_y + 8, size=1)
+    draw_text("Mode", info_x + btn_w + 8, btn_y + 8, size=1)
+    draw_text("Fan", info_x + 2 * btn_w + 8, btn_y + 8, size=1)
 
     return [
-        ((x, y + h - 34, col_w, 34), {"kind": "ac_power", "device_id": device_id, "state": next_state}),
-        ((x + col_w, y + h - 34, col_w, 34), {"kind": "open_modal", "type": "setpoint", "device_id": device_id}),
-        ((x + 2 * col_w, y + h - 34, col_w, 34), {"kind": "open_modal", "type": "mode", "device_id": device_id}),
-        ((x + 3 * col_w, y + h - 34, col_w, 34), {"kind": "open_modal", "type": "fan", "device_id": device_id}),
+        ((icon_x, icon_y, icon_size, icon_size), {"kind": "ac_power", "device_id": device_id, "state": next_state}),
+        ((info_x, btn_y, btn_w, btn_h), {"kind": "open_modal", "type": "setpoint", "device_id": device_id}),
+        ((info_x + btn_w, btn_y, btn_w, btn_h), {"kind": "open_modal", "type": "mode", "device_id": device_id}),
+        ((info_x + 2 * btn_w, btn_y, btn_w, btn_h), {"kind": "open_modal", "type": "fan", "device_id": device_id}),
         ((x + w - 70, y, 70, 24), {"kind": "ac_live_refresh", "device_id": device_id}),
     ]
 
@@ -667,19 +724,36 @@ def _clock_text():
 
 
 # ============================================================
-# App logic + main loop
+# App logic + main loop.
+#
+# The loop's only frequent job is polling touch, so a press feels immediate -
+# that's the "primary loop". Everything else (clock, weather) is "ambient":
+# gated behind its own elapsed-time check so it does real work only rarely,
+# and every redraw it causes is scoped to just the region that actually needs
+# repainting (see redraw_tile/redraw_ac_row/redraw_header_only below) rather
+# than a full-screen repaint. There's deliberately no polling of Shelly/AC
+# device state at all - see the AppState comment above.
 # ============================================================
 
 app = None
-last_shelly = 0
-last_ac = 0
 last_weather = 0
+last_clock_check = 0
+last_displayed_minute = None
 partial_redraws_since_full = 0
+
+CLOCK_CHECK_MS = 5000  # how often we glance at the clock, not how often it redraws
+
+
+def _due_for_full_refresh():
+    return partial_redraws_since_full >= FULL_REFRESH_EVERY
 
 
 def redraw(full=False):
+    """Full-screen redraw - reserved for moments where the whole screen
+    legitimately changes anyway: initial boot, switching tabs, opening/closing
+    a modal. Everything else uses a scoped redraw_*() below."""
     global partial_redraws_since_full
-    if not full and partial_redraws_since_full >= FULL_REFRESH_EVERY:
+    if not full and _due_for_full_refresh():
         full = True
     log("redraw(full=%s) tab=%s modal=%s" % (full, app.active_tab, app.active_modal))
     begin_frame(full=full)
@@ -697,31 +771,92 @@ def redraw(full=False):
     partial_redraws_since_full = 0 if full else partial_redraws_since_full + 1
 
 
-def _with_busy(device_id, action_fn):
-    app.set_busy(device_id, True)
+def _replace_hit_regions(device_id, new_regions):
+    """Scoped redraws only repaint one tile/row, so app.hit_regions must be
+    patched to match - drop any existing regions for this device_id (they may
+    now be stale, e.g. an on/off button's next-command flipped) and append the
+    freshly drawn ones. Skipping this was the actual bug behind "AC stops
+    responding after the first tap": the second tap was still being matched
+    against the pre-action hit region."""
+    app.hit_regions = [(r, a) for (r, a) in app.hit_regions if a.get("device_id") != device_id] + new_regions
+
+
+def redraw_tile(device_id):
+    """Scoped redraw for one Luzes/Estores tile - used after every tap so a
+    light/switch/cover toggle feels instant instead of waiting on a full
+    screen repaint."""
+    global partial_redraws_since_full
+    if _due_for_full_refresh():
+        redraw(full=True)
+        return
+    devices = app.devices_for_tab(app.active_tab)
+    per_page = page_size()
+    page_devices = devices[app.page * per_page:app.page * per_page + per_page]
+    for slot, device in enumerate(page_devices):
+        if device["id"] == device_id:
+            log("redraw_tile(%s) slot=%s" % (device_id, slot))
+            begin_frame(full=False)
+            new_regions = draw_device_tile(tile_rect(slot), device, app.is_busy(device_id))
+            _replace_hit_regions(device_id, new_regions)
+            partial_redraws_since_full += 1
+            return
+    redraw()  # device isn't on the currently visible page - fall back to a full redraw
+
+
+def redraw_ac_row(device_id):
+    """Scoped redraw for one AC row."""
+    global partial_redraws_since_full
+    if _due_for_full_refresh():
+        redraw(full=True)
+        return
+    devices = app.daikin_devices
+    for slot, device in enumerate(devices):
+        if device["id"] == device_id:
+            log("redraw_ac_row(%s) slot=%s" % (device_id, slot))
+            begin_frame(full=False)
+            new_regions = draw_ac_row(ac_row_rect(slot, max(len(devices), 1)), device, app.is_busy(device_id))
+            _replace_hit_regions(device_id, new_regions)
+            partial_redraws_since_full += 1
+            return
     redraw()
+
+
+def redraw_header_only():
+    """Scoped redraw for the clock/weather header - has no hit regions, so no
+    hit_regions patching needed."""
+    global partial_redraws_since_full
+    if _due_for_full_refresh():
+        redraw(full=True)
+        return
+    log("redraw_header_only()")
+    begin_frame(full=False)
+    draw_header(app)
+    partial_redraws_since_full += 1
+
+
+def _with_busy_row(device_id, action_fn):
+    """AC actions are real ~10s BLE round trips, so unlike lights/covers they
+    get a visible busy state - scoped to just that row."""
+    app.set_busy(device_id, True)
+    redraw_ac_row(device_id)
     action_fn()
     app.set_busy(device_id, False)
+    redraw_ac_row(device_id)
 
 
 def _apply_modal_choice(modal, value):
     device_id = modal["device_id"]
     kind = modal["type"]
     if kind == "position":
-        shelly_position(device_id, value)
-        app.refresh_shelly()
+        app.patch_shelly_device(shelly_position(device_id, value))
     elif kind == "brightness":
-        shelly_light_level(device_id, value)
-        app.refresh_shelly()
+        app.patch_shelly_device(shelly_light_level(device_id, value))
     elif kind == "setpoint":
-        daikin_setpoint(device_id, value)
-        app.refresh_daikin()
+        app.patch_daikin_device(daikin_setpoint(device_id, value))
     elif kind == "mode":
-        daikin_mode(device_id, value)
-        app.refresh_daikin()
+        app.patch_daikin_device(daikin_mode(device_id, value))
     elif kind == "fan":
-        daikin_fan(device_id, value)
-        app.refresh_daikin()
+        app.patch_daikin_device(daikin_fan(device_id, value))
 
 
 def handle_action(action):
@@ -733,6 +868,13 @@ def handle_action(action):
         app.active_tab = action["tab"]
         app.active_modal = None
         app.page = 0
+        # Tab switch is the one moment we do fetch fresh device state - acts
+        # as a manual "pull to refresh" too, since re-tapping the already
+        # active tab still re-fetches it.
+        if app.active_tab == TAB_AC:
+            app.refresh_daikin()
+        else:
+            app.refresh_shelly()
         redraw()
 
     elif kind == "close_modal":
@@ -749,70 +891,45 @@ def handle_action(action):
 
     elif kind == "switch_toggle":
         device_id = action["device_id"]
-
-        def do():
-            shelly_action(device_id, "toggle")
-            app.refresh_shelly()
-
-        _with_busy(device_id, do)
-        redraw()
+        app.patch_shelly_device(shelly_action(device_id, "toggle"))
+        redraw_tile(device_id)
 
     elif kind == "light_power":
         device_id = action["device_id"]
-        command = action["command"]
-
-        def do():
-            shelly_light_action(device_id, command)
-            app.refresh_shelly()
-
-        _with_busy(device_id, do)
-        redraw()
+        app.patch_shelly_device(shelly_light_action(device_id, action["command"]))
+        redraw_tile(device_id)
 
     elif kind == "cover_cmd":
         device_id = action["device_id"]
-        command = action["command"]
-
-        def do():
-            shelly_cover_action(device_id, command)
-            app.refresh_shelly()
-
-        _with_busy(device_id, do)
-        redraw()
+        app.patch_shelly_device(shelly_cover_action(device_id, action["command"]))
+        redraw_tile(device_id)
 
     elif kind == "ac_power":
         device_id = action["device_id"]
         target_state = action["state"]
 
         def do():
-            daikin_power(device_id, target_state)
-            app.refresh_daikin()
+            app.patch_daikin_device(daikin_power(device_id, target_state))
 
-        _with_busy(device_id, do)
-        redraw()
+        _with_busy_row(device_id, do)
 
     elif kind == "ac_live_refresh":
         device_id = action["device_id"]
 
         def do():
-            app.refresh_daikin(live=True)
+            app.patch_daikin_device(get_daikin_status(device_id, live=True))
 
-        _with_busy(device_id, do)
-        redraw()
+        _with_busy_row(device_id, do)
 
     elif kind == "modal_choice":
         modal = app.active_modal
-        value = action["value"]
-
-        def do():
-            _apply_modal_choice(modal, value)
-
-        _with_busy(modal["device_id"], do)
+        _apply_modal_choice(modal, action["value"])
         app.active_modal = None
         redraw()
 
 
 def setup():
-    global app, last_shelly, last_ac, last_weather
+    global app, last_weather, last_clock_check, last_displayed_minute
 
     log("setup(): calling hw_init()")
     hw_init()
@@ -837,14 +954,15 @@ def setup():
     log("setup(): done")
 
     now = time.ticks_ms()
-    last_shelly = now
-    last_ac = now
     last_weather = now
+    last_clock_check = now
+    last_displayed_minute = time.localtime()[4]
 
 
 def loop():
-    global last_shelly, last_ac, last_weather
+    global last_weather, last_clock_check, last_displayed_minute
 
+    # Primary loop: touch. Checked every tick so a press feels immediate.
     touch = poll_touch()
     if touch:
         log("loop(): touch at %s" % (touch,))
@@ -852,23 +970,24 @@ def loop():
         log("loop(): action=%s" % (action,))
         handle_action(action)
         time.sleep_ms(200)  # debounce: ignore rapid repeat taps
+        return  # prioritize the next touch poll over ambient checks below
 
+    # Ambient: clock/weather. Gated behind their own elapsed-time checks so
+    # they do real work (and touch a pixel) only rarely - not a device poll,
+    # just a local clock/cache glance.
     now = time.ticks_ms()
 
-    if time.ticks_diff(now, last_shelly) >= SHELLY_POLL_MS:
-        last_shelly = now
-        if app.refresh_shelly() and not app.active_modal:
-            redraw()
-
-    if time.ticks_diff(now, last_ac) >= AC_POLL_MS:
-        last_ac = now
-        if app.refresh_daikin() and not app.active_modal:
-            redraw()
+    if time.ticks_diff(now, last_clock_check) >= CLOCK_CHECK_MS:
+        last_clock_check = now
+        current_minute = time.localtime()[4]
+        if current_minute != last_displayed_minute:
+            last_displayed_minute = current_minute
+            redraw_header_only()
 
     if time.ticks_diff(now, last_weather) >= WEATHER_POLL_MS:
         last_weather = now
         if app.refresh_weather():
-            redraw()
+            redraw_header_only()
 
     time.sleep_ms(TICK_MS)
 

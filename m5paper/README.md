@@ -83,17 +83,61 @@ Also: the clock reads the device's RTC, which UIFlow2 normally syncs via NTP at
 boot. If the clock shows a wrong/zero time, that's a device time-sync issue,
 not something this app handles.
 
+## State icons
+
+Lights, switches, blinds, and the AC power button all show a big square gauge
+instead of small text — filled black = fully on/open, empty/outline = fully
+off/closed, and for blinds specifically it fills proportionally to how open
+they are (a 60%-open blind shows a square that's 60% filled from the bottom
+up). The AC power icon in particular spans nearly the full height of its row —
+a small text button was easy to miss and hard to hit; this one isn't.
+
+## Architecture: no background polling, every redraw is scoped
+
+This got rewritten from an earlier version that polled Shelly/AC every 30s in
+the background and did a full-screen redraw on every tap. Both were wrong for
+an e-paper, battery-conscious device:
+
+- **Nothing is polled in the background except weather** (every 15 min — one
+  cheap call, already server-cached). Shelly/AC device state is fetched only
+  when you switch tabs (which doubles as a manual "pull to refresh" — even
+  re-tapping the already-active tab re-fetches it), and after your own actions
+  it's patched directly from that action's own response — every Shelly/Daikin
+  endpoint already returns the device's new state, so there's never a reason
+  to re-fetch the whole list just to see the result of what you just did.
+- **Every redraw is scoped to the smallest region that actually changed**:
+  `redraw_tile()` for a single Luzes/Estores tile, `redraw_ac_row()` for one
+  AC row, `redraw_header_only()` for the clock/weather strip. Full-screen
+  `redraw()` is reserved for moments where the whole screen legitimately
+  changes anyway — initial boot, switching tabs, opening/closing a modal — not
+  for routine taps.
+- **The main loop's only frequent job is polling touch**, so a press feels
+  immediate. Everything else (clock, weather) is "ambient": gated behind its
+  own elapsed-time check inside the same loop (MicroPython here is
+  single-threaded, no `uasyncio` — see below — so there isn't a second, truly
+  independent loop; the separation is in what each check *does*, not in having
+  two literal loops) so it does real, pixel-touching work only rarely. The
+  clock is checked every 5s but only actually redrawn (scoped to the header)
+  when the displayed minute changes — not every tick, and not full-screen.
+
+**The scoped-redraw fix also fixed a real bug**, not just a performance
+tweak: a scoped redraw only repaints one tile/row, so `app.hit_regions` (the
+list `hit_test()` matches taps against) has to be patched to match — drop the
+stale entries for that device, append the freshly drawn ones. The first version
+of this rewrite forgot that step, which is exactly why AC stopped responding
+after the first tap: the second tap was still being matched against the
+pre-action hit region (e.g. a stale "turn on" region after the AC had already
+turned on). `_replace_hit_regions()` fixes this and every scoped redraw goes
+through it.
+
 ## Deliberate scope decisions
 
 - **Single file**, organized in commented sections (config → hardware → Flask
-  API client → app state/change detection → screen geometry/hit-testing →
-  drawing → main loop) rather than a multi-file package.
-- **No per-tile partial redraw / dirty-rects.** A poll either changed
-  *something* (repaint everything — cheap, it's just software drawing) or
-  changed nothing (skip the panel refresh entirely, which is the actually
-  expensive/flickery part on e-paper).
-- **Blocking HTTP calls, no `uasyncio`.** AC commands take a real 7-10s BLE
-  round trip; the tile shows "..." *before* the call so you get instant
-  feedback, and touch is naturally ignored while blocked.
+  API client → app state → screen geometry/hit-testing → drawing → app
+  logic/main loop) rather than a multi-file package.
+- **Blocking HTTP calls, no `uasyncio`.** Matches this repo's general
+  minimalism. AC commands take a real 7-10s BLE round trip; that row shows
+  "..." *before* the call so you get instant feedback, and touch is naturally
+  ignored while blocked (nothing polls it meanwhile — this is single-threaded).
 - **Preset buttons instead of sliders** for position/brightness/setpoint/mode/
   fan — continuous drag doesn't work well against e-paper's slow refresh.
