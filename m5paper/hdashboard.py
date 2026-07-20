@@ -127,6 +127,21 @@ def begin_frame(full=False):
     Lcd.setEpdMode(EPD_QUALITY if full else EPD_FASTEST)
 
 
+def begin_batch():
+    """Wraps a group of draw calls into one panel transaction (confirmed via
+    the official UIFlow2 docs: Lcd.startWrite()/endWrite()). Without this,
+    each individual fillRect/drawRect/drawText call may trigger its own
+    separate e-paper refresh - a single tile redraw makes ~6-10 draw calls, so
+    that reads as multiple seconds of lag for what should be one instant
+    update. Every redraw_*() function wraps its draw calls in
+    begin_batch()/end_batch() for exactly this reason."""
+    Lcd.startWrite()
+
+
+def end_batch():
+    Lcd.endWrite()
+
+
 def poll_touch():
     """Return (x, y) of a new touch press (down-edge only), or None."""
     M5.update()
@@ -828,6 +843,7 @@ def redraw(full=False):
         full = True
     log("redraw(full=%s) tab=%s modal=%s" % (full, app.active_tab, app.active_modal))
     begin_frame(full=full)
+    begin_batch()
     hw_clear()
     regions = []
     regions += draw_header(app)
@@ -837,6 +853,7 @@ def redraw(full=False):
     else:
         regions += draw_body(app)
     regions += draw_footer(app)
+    end_batch()
     app.hit_regions = regions
     log("redraw() done, %d hit regions" % len(regions))
     partial_redraws_since_full = 0 if full else partial_redraws_since_full + 1
@@ -867,7 +884,9 @@ def redraw_tile(device_id):
         if device["id"] == device_id:
             log("redraw_tile(%s) slot=%s" % (device_id, slot))
             begin_frame(full=False)
+            begin_batch()
             new_regions = draw_device_tile(tile_rect(slot), device, app.is_busy(device_id))
+            end_batch()
             _replace_hit_regions(device_id, new_regions)
             partial_redraws_since_full += 1
             return
@@ -885,7 +904,9 @@ def redraw_ac_row(device_id):
         if device["id"] == device_id:
             log("redraw_ac_row(%s) slot=%s" % (device_id, slot))
             begin_frame(full=False)
+            begin_batch()
             new_regions = draw_ac_row(ac_row_rect(slot, max(len(devices), 1)), device, app.is_busy(device_id))
+            end_batch()
             _replace_hit_regions(device_id, new_regions)
             partial_redraws_since_full += 1
             return
@@ -901,7 +922,9 @@ def redraw_header_only():
         return
     log("redraw_header_only()")
     begin_frame(full=False)
+    begin_batch()
     draw_header(app)
+    end_batch()
     partial_redraws_since_full += 1
 
 

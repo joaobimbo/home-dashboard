@@ -73,11 +73,23 @@ of the file once things are working, to quiet the log.
   to close off that risk, whether or not it was the actual cause of a blank
   screen you saw.
 
-## One thing still worth watching for
+## Fixed: ~5s to toggle a light (this was the real cause)
 
-Whether draws batch into one atomic screen update, or each shape/text call
-visibly flashes the panel individually during a redraw. Not a bug either way —
-worst case is a slightly busier-looking refresh than necessary.
+Confirmed on real hardware: without batching, each individual `fillRect`/
+`drawRect`/`drawText` call was triggering its *own* separate e-paper panel
+refresh. A single tile redraw makes something like 6-10 draw calls (tile
+background, border, icon fill, icon border, 1-2 text lines, 1-2 buttons) - at
+a few hundred ms per flash, that's the several seconds of lag reported, not a
+one-off glitch.
+
+Confirmed via the official UIFlow2 docs: `Lcd.startWrite()` / `Lcd.endWrite()`
+batch everything drawn between them into one panel transaction. Every
+`redraw*()` function now wraps its draw calls in `begin_batch()`/`end_batch()`
+(thin wrappers around those two calls). If toggling still feels slow after
+this, the panel itself may just be slow in `EPD_FASTEST` mode on this unit —
+worth timing a redraw over serial (`DEBUG = True` already logs each
+`redraw_tile()`/`redraw_ac_row()` call) to see whether it's the batching or
+the hardware.
 
 Also: the clock reads the device's RTC, which UIFlow2 normally syncs via NTP at
 boot. If the clock shows a wrong/zero time, that's a device time-sync issue,
