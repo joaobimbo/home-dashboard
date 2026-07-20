@@ -2,11 +2,20 @@
 #
 # This is the ONLY file that talks to M5Unified/UIFlow2 APIs directly. If a method
 # name here doesn't match the real firmware, this is the one file to fix - nothing
-# else in the app touches M5.* directly. NOT YET VERIFIED ON HARDWARE, see
-# m5paper/README.md's build/verification order - method names below are the
-# best-known UIFlow2 MicroPython binding names for M5Unified-based devices
-# (M5.begin, M5.Display, M5.Touch); the PaperS3's e-paper refresh-mode selection in
-# particular is the most likely thing to need adjusting once tested for real.
+# else in the app touches M5.* directly.
+#
+# Verified against the official UIFlow2 MicroPython docs
+# (uiflow-micropython.readthedocs.io): the display object is M5.Lcd (class
+# M5.Display), drawRect/fillRect/drawString/setTextColor/setTextSize match what's
+# used below, and M5.Lcd.setEpdMode() controls e-paper refresh quality/speed - there
+# is no separate flush/push call, draws update the panel directly under whichever
+# mode is currently set. Touch is M5.Touch.getCount() + M5.Touch.getDetail(0)
+# (an 11-element TUPLE, not an object - index 5 is wasPressed) plus separate
+# M5.Touch.getX()/getY() calls for coordinates.
+#
+# Still unverified: whether individual draw calls each visibly flash the panel
+# during a redraw, or whether some batching (e.g. startWrite/endWrite) exists to
+# make a frame atomic - see m5paper/README.md's verification checklist.
 
 import M5
 
@@ -16,55 +25,54 @@ HEIGHT = 540
 BLACK = 0x000000
 WHITE = 0xFFFFFF
 
-_partial_refreshes_since_full = 0
+EPD_QUALITY = 0
+EPD_TEXT = 1
+EPD_FAST = 2
+EPD_FASTEST = 3
 
 
 def init():
     """Initialize the display and touch controller. Call once at startup."""
     global WIDTH, HEIGHT
     M5.begin()
-    WIDTH = M5.Display.width()
-    HEIGHT = M5.Display.height()
-    M5.Display.clear(WHITE)
+    WIDTH = M5.Lcd.width()
+    HEIGHT = M5.Lcd.height()
+    M5.Lcd.setEpdMode(EPD_QUALITY)
+    M5.Lcd.clear(WHITE)
 
 
 def clear():
-    M5.Display.clear(WHITE)
+    M5.Lcd.fillScreen(WHITE)
 
 
 def fill_rect(x, y, w, h, color=WHITE):
-    M5.Display.fillRect(x, y, w, h, color)
+    M5.Lcd.fillRect(x, y, w, h, color)
 
 
 def rect(x, y, w, h, color=BLACK):
-    M5.Display.drawRect(x, y, w, h, color)
+    M5.Lcd.drawRect(x, y, w, h, color)
 
 
 def text(s, x, y, color=BLACK, size=1):
-    M5.Display.setTextSize(size)
-    M5.Display.setTextColor(color, WHITE)
-    M5.Display.drawString(s, x, y)
+    M5.Lcd.setTextSize(size)
+    M5.Lcd.setTextColor(color, WHITE)
+    M5.Lcd.drawString(s, x, y)
 
 
-def refresh(full=False):
-    """Push the frame buffer to the e-paper panel."""
-    global _partial_refreshes_since_full
-    M5.Display.display()
-    if full:
-        _partial_refreshes_since_full = 0
-    else:
-        _partial_refreshes_since_full += 1
-
-
-def full_refresh_due(threshold):
-    return _partial_refreshes_since_full >= threshold
+def begin_frame(full=False):
+    """Call before drawing a frame - sets the e-paper refresh mode for the draw
+    calls that follow (there's no separate post-draw flush/push call). Use
+    full=True for a clean/ghost-clearing pass (tab switches, periodic
+    ghost-clearing), full=False for quick updates (busy-state flips, polls)."""
+    M5.Lcd.setEpdMode(EPD_QUALITY if full else EPD_FASTEST)
 
 
 def poll_touch():
-    """Return (x, y) of a current touch press, or None if no touch is active."""
+    """Return (x, y) of a new touch press (down-edge only), or None."""
     M5.update()
     if M5.Touch.getCount() > 0:
         detail = M5.Touch.getDetail(0)
-        if detail.isPressed() or detail.wasPressed():
-            return detail.x, detail.y
+        was_pressed = detail[5]  # wasPressed
+        if was_pressed:
+            return M5.Touch.getX(), M5.Touch.getY()
     return None
