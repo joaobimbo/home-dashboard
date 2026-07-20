@@ -200,6 +200,14 @@ an e-paper, battery-conscious device:
   it's patched directly from that action's own response — every Shelly/Daikin
   endpoint already returns the device's new state, so there's never a reason
   to re-fetch the whole list just to see the result of what you just did.
+  **Exception**: a bounded retry-until-first-success safety net (every 5s,
+  `INITIAL_SYNC_RETRY_MS`) for the *initial* boot fetch specifically. Without
+  it, a failed first `refresh_shelly()` (e.g. Wi-Fi not fully up yet at boot)
+  meant `available_tabs()` never showed Luzes/Estores at all — and since
+  tapping one of those tabs is what would normally trigger a re-fetch, there
+  was no tab button left to tap to ever recover. This isn't a return to
+  background polling: `shelly_loaded`/`daikin_loaded` flip permanently true on
+  first success and the retries stop for good.
 - **Every redraw is scoped to the smallest region that actually changed**:
   `redraw_tile()` for a single Luzes/Estores tile, `redraw_ac_row()` for one
   AC row, `redraw_header_only()` for the clock/weather strip. Full-screen

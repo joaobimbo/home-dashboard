@@ -306,6 +306,15 @@ class AppState:
         self.busy_ids = set()
         self.page = 0
         self.hit_regions = []
+        # Set True the first time each refresh succeeds. Used only to retry a
+        # failed *initial* sync (see loop()) - if the very first refresh_shelly()
+        # at boot fails (e.g. Wi-Fi not fully up yet), available_tabs() would
+        # never show Luzes/Estores, and since those tabs' buttons are what
+        # would normally trigger a re-fetch, there'd be no way to ever recover
+        # without this. Once True, no further retries happen - this is a
+        # boot-recovery safety net, not a return to background polling.
+        self.shelly_loaded = False
+        self.daikin_loaded = False
 
     # --- tabs ---------------------------------------------------------------
 
@@ -354,6 +363,7 @@ class AppState:
 
         self.shelly_devices = merged
         self.online = True
+        self.shelly_loaded = True
 
     def refresh_daikin(self, live=False):
         configured = get_daikin_devices()
@@ -371,6 +381,7 @@ class AppState:
 
         self.daikin_devices = merged
         self.online = True
+        self.daikin_loaded = True
 
     def refresh_weather(self):
         result = get_weather()
@@ -833,9 +844,12 @@ app = None
 last_weather = 0
 last_clock_check = 0
 last_displayed_minute = None
+last_shelly_retry = 0
+last_daikin_retry = 0
 partial_redraws_since_full = 0
 
 CLOCK_CHECK_MS = 5000  # how often we glance at the clock, not how often it redraws
+INITIAL_SYNC_RETRY_MS = 5000  # boot-recovery only - see loop()
 
 
 def _due_for_full_refresh():
@@ -1061,6 +1075,7 @@ def handle_action(action):
 
 def setup():
     global app, last_weather, last_clock_check, last_displayed_minute
+    global last_shelly_retry, last_daikin_retry
 
     log("setup(): calling hw_init()")
     hw_init()
@@ -1088,10 +1103,13 @@ def setup():
     last_weather = now
     last_clock_check = now
     last_displayed_minute = time.localtime()[4]
+    last_shelly_retry = now
+    last_daikin_retry = now
 
 
 def loop():
     global last_weather, last_clock_check, last_displayed_minute
+    global last_shelly_retry, last_daikin_retry
 
     # Primary loop: touch. Checked every tick so a press feels immediate.
     touch = poll_touch()
@@ -1119,6 +1137,28 @@ def loop():
         last_weather = now
         if app.refresh_weather():
             redraw_header_only()
+
+    # Boot-recovery retry: if the *initial* sync at setup() failed (e.g.
+    # Wi-Fi wasn't fully up yet), keep retrying every INITIAL_SYNC_RETRY_MS
+    # until it succeeds once - without this, a failed first fetch would mean
+    # available_tabs() never shows Luzes/Estores, and since tapping one of
+    # those tabs is what would normally trigger a re-fetch, there'd be no way
+    # to ever recover. Stops permanently once loaded - not background polling.
+    if not app.shelly_loaded and time.ticks_diff(now, last_shelly_retry) >= INITIAL_SYNC_RETRY_MS:
+        last_shelly_retry = now
+        log("loop(): retrying initial shelly sync")
+        app.refresh_shelly()
+        if app.shelly_loaded and not app.active_modal:
+            app.ensure_active_tab()
+            redraw(full=True)
+
+    if not app.daikin_loaded and time.ticks_diff(now, last_daikin_retry) >= INITIAL_SYNC_RETRY_MS:
+        last_daikin_retry = now
+        log("loop(): retrying initial daikin sync")
+        app.refresh_daikin()
+        if app.daikin_loaded and not app.active_modal:
+            app.ensure_active_tab()
+            redraw(full=True)
 
     time.sleep_ms(TICK_MS)
 
