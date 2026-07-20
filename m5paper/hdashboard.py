@@ -161,6 +161,34 @@ def poll_touch():
     return None
 
 
+def get_battery_percent():
+    return M5.Power.getBatteryLevel()
+
+
+def is_charging():
+    return M5.Power.isCharging()
+
+
+def light_sleep_ms(ms):
+    """Low-power idle wait, in place of a plain time.sleep_ms(). Confirmed via
+    official docs: light sleep (unlike deep sleep) can wake early on touch on
+    this board, since the touch interrupt isn't on an RTC-domain GPIO (deep
+    sleep needs one, light sleep doesn't - CPU/RAM stay powered). Falls back
+    to a plain sleep if this raises (e.g. unsupported in some state) so a
+    sleep-mode edge case can't crash the whole app.
+
+    NOT verified whether it actually wakes early on touch versus always
+    sleeping the full duration - worth checking with DEBUG=True: if touch
+    still feels responsive, it's working; if taps feel like they wait up to
+    TICK_MS before registering, it isn't, and TICK_MS is the fallback bound
+    either way rather than something to raise blindly."""
+    try:
+        M5.Power.lightSleep(ms * 1000, True)
+    except Exception as exc:
+        log("light_sleep_ms(%d) failed: %s - falling back to time.sleep_ms" % (ms, exc))
+        time.sleep_ms(ms)
+
+
 # ============================================================
 # Flask API client - thin requests2 wrapper (requests2 is UIFlow2's own HTTP
 # client; it replaced urequests platform-wide, confirmed on-device - urequests
@@ -546,6 +574,11 @@ def draw_header(app):
     else:
         label = "Weather --"
     draw_text(label, w - 340, _text_center_y(y, h, 2), size=2)
+
+    battery_label = "%d%%" % get_battery_percent()
+    if is_charging():
+        battery_label += " +"
+    draw_text(battery_label, w - 90, y + 6, size=2)
     return []
 
 
@@ -1160,7 +1193,7 @@ def loop():
             app.ensure_active_tab()
             redraw(full=True)
 
-    time.sleep_ms(TICK_MS)
+    light_sleep_ms(TICK_MS)
 
 
 log("hdashboard.py: starting")

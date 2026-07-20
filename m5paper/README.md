@@ -233,6 +233,42 @@ pre-action hit region (e.g. a stale "turn on" region after the AC had already
 turned on). `_replace_hit_regions()` fixes this and every scoped redraw goes
 through it.
 
+## Battery indicator + light sleep
+
+Header now shows battery % (top-right), with a `+` suffix while charging -
+`M5.Power.getBatteryLevel()` / `M5.Power.isCharging()`, confirmed via the
+official UIFlow2 Power docs.
+
+**On sleep specifically - a real hardware limitation, not a design choice:**
+touch can only wake this board from *light* sleep, not deep sleep - the touch
+controller's interrupt line isn't wired to an RTC-domain GPIO, which deep
+sleep requires (light sleep doesn't, since CPU/RAM stay powered). There are
+also documented community reports of deep sleep on battery-only power simply
+failing to wake at all (touch *or* timer), which would mean a dead panel
+requiring a physical reset. Given that, this uses light sleep only:
+`light_sleep_ms()` wraps `M5.Power.lightSleep(ms * 1000, True)` in place of
+the idle loop's `time.sleep_ms()`, with a plain-`sleep_ms` fallback if it ever
+raises. State is preserved across light sleep (unlike deep sleep, which
+restarts the whole script), so this doesn't change any other behavior.
+
+**Not verified: whether it actually wakes early on touch, or always sleeps
+the full `TICK_MS` (100ms) before the next poll.** Either way there's no
+correctness risk - just check with `DEBUG = True` whether taps still feel
+instant. If it's confirmed working, `TICK_MS` could likely go up a lot (more
+time genuinely asleep between touches = more savings) without hurting
+responsiveness, since a touch would interrupt the sleep early regardless of
+how long it's set to. Left at 100 for now rather than guess at a bigger
+number blind.
+
+**Don't expect "a week" as a given** - that number came from the request, not
+from a measured power budget. E-paper itself draws ~0 outside of a refresh
+(bistable, holds the image with no power), but Wi-Fi + an ESP32-S3 CPU that's
+awake all day, even briefly and even in light sleep between checks, adds up
+in ways that are hard to predict without measuring current draw on the actual
+unit. If a week turns out to be optimistic, the next lever (not implemented)
+would be increasing `TICK_MS` and/or the various poll intervals further once
+light-sleep wake-on-touch is confirmed - not deep sleep, given the risk above.
+
 ## Deliberate scope decisions
 
 - **Single file**, organized in commented sections (config → hardware → Flask
