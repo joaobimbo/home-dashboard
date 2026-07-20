@@ -49,7 +49,7 @@ def log(msg):
 
 # LAN address of the Flask dashboard server, e.g. "http://192.168.1.50:5000"
 # (find it from what `python app.py` prints on startup, or `hostname -I` on the host).
-SERVER_URL = "http://192.168.1.50:5000"
+SERVER_URL = "http://192.168.1.208:5000"
 
 # Weather polling cadence, in milliseconds - the only thing polled on a timer.
 # Shelly/AC device state is deliberately NOT polled in the background: e-paper
