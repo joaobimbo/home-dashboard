@@ -251,14 +251,28 @@ the idle loop's `time.sleep_ms()`, with a plain-`sleep_ms` fallback if it ever
 raises. State is preserved across light sleep (unlike deep sleep, which
 restarts the whole script), so this doesn't change any other behavior.
 
+`TICK_MS` (the light-sleep duration) is **60 seconds**, not 100ms — the
+point of light sleep is to actually stay asleep between touches, not wake up
+on a tight poll. Touch wakes it immediately regardless of this value
+(confirmed: touch can wake light sleep on this board), so 60s only bounds how
+stale the clock/weather/boot-recovery-retry can get while genuinely
+untouched — it has no effect on tap responsiveness. `CLOCK_CHECK_MS` (a
+separate, smaller polling interval that used to gate the clock/minute check)
+was removed as redundant once `TICK_MS` alone is larger than it was — the
+clock is now just checked every loop iteration, which itself only happens
+once per `TICK_MS` or right after a touch.
+
 **Not verified: whether it actually wakes early on touch, or always sleeps
-the full `TICK_MS` (100ms) before the next poll.** Either way there's no
-correctness risk - just check with `DEBUG = True` whether taps still feel
-instant. If it's confirmed working, `TICK_MS` could likely go up a lot (more
-time genuinely asleep between touches = more savings) without hurting
-responsiveness, since a touch would interrupt the sleep early regardless of
-how long it's set to. Left at 100 for now rather than guess at a bigger
-number blind.
+the full 60s before the next check.** No correctness risk either way — just
+check with `DEBUG = True` whether taps still feel instant after a long idle
+period. If they do, wake-on-touch is confirmed working.
+
+## Clock timezone
+
+`UTC_OFFSET_HOURS` (config section) is added to whatever the device's
+NTP-synced RTC holds before formatting the clock — UIFlow2 syncs time at boot
+but doesn't appear to apply a local offset on its own, so the clock shows raw
+UTC unless corrected here. Defaults to `1`; adjust for your timezone/DST.
 
 **Don't expect "a week" as a given** - that number came from the request, not
 from a measured power budget. E-paper itself draws ~0 outside of a refresh

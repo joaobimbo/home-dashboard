@@ -65,8 +65,18 @@ WEATHER_POLL_MS = 900000
 # Force a full (flash) e-paper refresh every N partial refreshes, to clear ghosting.
 FULL_REFRESH_EVERY = 20
 
-# Main loop tick, in milliseconds - how often touch is polled and timers are checked.
-TICK_MS = 100
+# How long the device light-sleeps between checks when idle, in milliseconds.
+# Touch wakes it immediately regardless of this value (confirmed: touch can
+# wake from light sleep on this board - see light_sleep_ms()), so this only
+# controls how stale the clock/weather/initial-sync-retry can get while
+# untouched, not how responsive taps feel. Deliberately long - the point of
+# light sleep is to actually stay asleep, not wake on a tight poll.
+TICK_MS = 60000
+
+# Local clock is offset from whatever the device's NTP-synced RTC holds
+# (assumed UTC) by this many hours - adjust for your timezone/DST. UIFlow2
+# syncs time at boot but doesn't appear to apply a local offset on its own.
+UTC_OFFSET_HOURS = 1
 
 
 # ============================================================
@@ -857,7 +867,7 @@ def draw_footer(app):
 
 
 def _clock_text():
-    t = time.localtime()
+    t = time.localtime(time.time() + UTC_OFFSET_HOURS * 3600)
     return "%02d:%02d" % (t[3], t[4])
 
 
@@ -875,14 +885,16 @@ def _clock_text():
 
 app = None
 last_weather = 0
-last_clock_check = 0
 last_displayed_minute = None
 last_shelly_retry = 0
 last_daikin_retry = 0
 partial_redraws_since_full = 0
 
-CLOCK_CHECK_MS = 5000  # how often we glance at the clock, not how often it redraws
-INITIAL_SYNC_RETRY_MS = 5000  # boot-recovery only - see loop()
+INITIAL_SYNC_RETRY_MS = 5000  # boot-recovery only - see loop() (throttled by TICK_MS anyway)
+
+
+def _current_minute():
+    return time.localtime(time.time() + UTC_OFFSET_HOURS * 3600)[4]
 
 
 def _due_for_full_refresh():
@@ -1107,7 +1119,7 @@ def handle_action(action):
 
 
 def setup():
-    global app, last_weather, last_clock_check, last_displayed_minute
+    global app, last_weather, last_displayed_minute
     global last_shelly_retry, last_daikin_retry
 
     log("setup(): calling hw_init()")
@@ -1134,17 +1146,19 @@ def setup():
 
     now = time.ticks_ms()
     last_weather = now
-    last_clock_check = now
-    last_displayed_minute = time.localtime()[4]
+    last_displayed_minute = _current_minute()
     last_shelly_retry = now
     last_daikin_retry = now
 
 
 def loop():
-    global last_weather, last_clock_check, last_displayed_minute
+    global last_weather, last_displayed_minute
     global last_shelly_retry, last_daikin_retry
 
-    # Primary loop: touch. Checked every tick so a press feels immediate.
+    # Primary loop: touch. light_sleep_ms() below wakes immediately on touch
+    # regardless of how long it's set to, so this poll only actually runs
+    # right after such a wake (or after TICK_MS if nothing touched it) - not
+    # every 100ms.
     touch = poll_touch()
     if touch:
         log("loop(): touch at %s" % (touch,))
@@ -1154,17 +1168,16 @@ def loop():
         time.sleep_ms(200)  # debounce: ignore rapid repeat taps
         return  # prioritize the next touch poll over ambient checks below
 
-    # Ambient: clock/weather. Gated behind their own elapsed-time checks so
-    # they do real work (and touch a pixel) only rarely - not a device poll,
-    # just a local clock/cache glance.
+    # Ambient: clock/weather/boot-recovery. No separate elapsed-time gate
+    # needed here anymore - TICK_MS itself (60s) is now the throttle, since
+    # the device is asleep between iterations rather than looping every
+    # 100ms.
     now = time.ticks_ms()
 
-    if time.ticks_diff(now, last_clock_check) >= CLOCK_CHECK_MS:
-        last_clock_check = now
-        current_minute = time.localtime()[4]
-        if current_minute != last_displayed_minute:
-            last_displayed_minute = current_minute
-            redraw_header_only()
+    current_minute = _current_minute()
+    if current_minute != last_displayed_minute:
+        last_displayed_minute = current_minute
+        redraw_header_only()
 
     if time.ticks_diff(now, last_weather) >= WEATHER_POLL_MS:
         last_weather = now
