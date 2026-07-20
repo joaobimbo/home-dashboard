@@ -1,3 +1,5 @@
+# apps/hdashboard.py
+#
 # M5PaperS3 dashboard panel - single-file UIFlow2 MicroPython app.
 #
 # A touch-control panel mirroring the home-dashboard web UI: weather, and full
@@ -6,15 +8,16 @@
 # talks to devices directly. See README.md in this folder for deployment steps,
 # config, and the on-device verification checklist.
 #
-# setup()/loop() + the try/except wrapper at the bottom match UIFlow2's standard
-# project skeleton (what ships on a fresh device) so on-device errors still
-# surface via utility.print_error_msg instead of silently dying.
+# The try/except at the bottom keeps on-device errors visible via
+# utility.print_error_msg instead of silently dying with no serial console
+# attached.
 
 import time
 
 import M5
 import ujson
 import urequests
+from M5 import Lcd, Touch
 
 
 # ============================================================
@@ -44,14 +47,14 @@ TICK_MS = 100
 # ============================================================
 # Hardware - the only section touching M5Unified/UIFlow2 APIs directly.
 #
-# Verified against the official UIFlow2 MicroPython docs
-# (uiflow-micropython.readthedocs.io): the display object is M5.Lcd (class
-# M5.Display), drawRect/fillRect/drawString/setTextColor/setTextSize match what's
-# used below, and M5.Lcd.setEpdMode() controls e-paper refresh quality/speed -
-# there's no separate flush/push call, draws update the panel directly under
-# whichever mode is currently set. Touch is M5.Touch.getCount() +
-# M5.Touch.getDetail(0) (an 11-element TUPLE, not an object - index 5 is
-# wasPressed) plus separate M5.Touch.getX()/getY() calls for coordinates.
+# `from M5 import Lcd, Touch` + Lcd.setCursor()/.print() for text match a real
+# M5Stack-authored example (apps/helloworld.py), not just doc summaries.
+# Lcd.setEpdMode() controls e-paper refresh quality/speed - there's no separate
+# flush/push call, draws update the panel directly under whichever mode is
+# currently set. Touch is Touch.getCount() + Touch.getDetail(0) (an 11-element
+# TUPLE, not an object - index 5 is wasPressed) plus separate
+# Touch.getX()/getY() calls for coordinates (confirmed via the official UIFlow2
+# MicroPython docs, uiflow-micropython.readthedocs.io).
 #
 # Still unverified: whether individual draw calls each visibly flash the panel
 # during a redraw, or whether some batching exists to make a frame atomic - see
@@ -73,45 +76,46 @@ EPD_FASTEST = 3
 def hw_init():
     global WIDTH, HEIGHT
     M5.begin()
-    WIDTH = M5.Lcd.width()
-    HEIGHT = M5.Lcd.height()
-    M5.Lcd.setEpdMode(EPD_QUALITY)
-    M5.Lcd.clear(WHITE)
+    WIDTH = Lcd.width()
+    HEIGHT = Lcd.height()
+    Lcd.setEpdMode(EPD_QUALITY)
+    Lcd.clear(WHITE)
 
 
 def hw_clear():
-    M5.Lcd.fillScreen(WHITE)
+    Lcd.fillScreen(WHITE)
 
 
 def fill_rect(x, y, w, h, color=WHITE):
-    M5.Lcd.fillRect(x, y, w, h, color)
+    Lcd.fillRect(x, y, w, h, color)
 
 
 def draw_rect(x, y, w, h, color=BLACK):
-    M5.Lcd.drawRect(x, y, w, h, color)
+    Lcd.drawRect(x, y, w, h, color)
 
 
 def draw_text(s, x, y, color=BLACK, size=1):
-    M5.Lcd.setTextSize(size)
-    M5.Lcd.setTextColor(color, WHITE)
-    M5.Lcd.drawString(s, x, y)
+    Lcd.setTextSize(size)
+    Lcd.setTextColor(color, WHITE)
+    Lcd.setCursor(x, y)
+    Lcd.print(s)
 
 
 def begin_frame(full=False):
     """Sets the e-paper refresh mode for the draw calls that follow. full=True
     for a clean/ghost-clearing pass (tab switches, periodic ghost-clearing),
     full=False for quick updates (busy-state flips, polls)."""
-    M5.Lcd.setEpdMode(EPD_QUALITY if full else EPD_FASTEST)
+    Lcd.setEpdMode(EPD_QUALITY if full else EPD_FASTEST)
 
 
 def poll_touch():
     """Return (x, y) of a new touch press (down-edge only), or None."""
     M5.update()
-    if M5.Touch.getCount() > 0:
-        detail = M5.Touch.getDetail(0)
+    if Touch.getCount() > 0:
+        detail = Touch.getDetail(0)
         was_pressed = detail[5]  # wasPressed
         if was_pressed:
-            return M5.Touch.getX(), M5.Touch.getY()
+            return Touch.getX(), Touch.getY()
     return None
 
 
@@ -832,15 +836,14 @@ def loop():
     time.sleep_ms(TICK_MS)
 
 
-if __name__ == "__main__":
+try:
+    setup()
+    while True:
+        loop()
+except (Exception, KeyboardInterrupt) as e:
     try:
-        setup()
-        while True:
-            loop()
-    except (Exception, KeyboardInterrupt) as e:
-        try:
-            from utility import print_error_msg
+        from utility import print_error_msg
 
-            print_error_msg(e)
-        except ImportError:
-            print("please update to latest firmware")
+        print_error_msg(e)
+    except ImportError:
+        print("please update to latest firmware")

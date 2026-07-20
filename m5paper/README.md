@@ -11,17 +11,21 @@ here talks to devices directly, it only calls the same Flask API
 1. Open `hdashboard.py`, find `SERVER_URL` near the top, and set it to your
    Flask server's LAN address (e.g. `http://192.168.1.50:5000` — same address
    `python app.py` prints on startup).
-2. Open the UIFlow2 IDE, connect to the device, paste in the contents of
-   `hdashboard.py`.
-3. Click **Run Always**.
+2. Open the UIFlow2 IDE, connect to the device, and upload `hdashboard.py`
+   straight into the device's `apps` folder via the file manager (USB: click
+   WebTerminal → File).
+3. On the device, pick **hdashboard** from the app list (`APP.LIST`) to run it.
 
-That's it — the device will boot straight into the dashboard from now on.
+Individual apps on a UIFlow2 device are just single `.py` files sitting in
+`apps/` — that's confirmed directly from M5Stack's own example
+(`apps/helloworld.py`), not a guess. No packaging, no "Run Always" needed for
+this — dropping the file in is enough, and it shows up in the launcher named
+after the file.
 
-(UIFlow2 always runs whatever you deploy this way as `main.py` on the device,
-regardless of what the file was called before you pasted it in — that's a
-UIFlow2/MicroPython platform convention, not something this app controls. The
-file is named `hdashboard.py` here in the repo purely so it's recognizable
-next to everything else in this project.)
+If you'd rather it boot straight into the dashboard with no launcher/menu step
+at all, paste it into the code editor instead and use **Run Always** — UIFlow2
+writes whatever you deploy that way to `main.py`, which auto-runs at boot. Both
+paths work; pick whichever fits how you want to use the device.
 
 ## Two things worth confirming the first time you run it
 
