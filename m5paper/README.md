@@ -85,12 +85,68 @@ not something this app handles.
 
 ## State icons
 
-Lights, switches, blinds, and the AC power button all show a big square gauge
-instead of small text — filled black = fully on/open, empty/outline = fully
-off/closed, and for blinds specifically it fills proportionally to how open
-they are (a 60%-open blind shows a square that's 60% filled from the bottom
-up). The AC power icon in particular spans nearly the full height of its row —
-a small text button was easy to miss and hard to hit; this one isn't.
+Lights, switches, blinds, and the AC power button all show a square icon
+instead of relying on small text alone. Two different, deliberately distinct
+metaphors, not one:
+
+- **Lights/switches/AC power**: `_draw_state_icon()`, a simple filled-or-not
+  gauge. For lights/switches specifically, **white = on, black = off** (per
+  request — this is the opposite of a typical "filled = active" convention,
+  so don't "fix" it back). AC power keeps the more conventional filled=on.
+- **Blinds**: `_draw_blind_icon()`, a different metaphor on purpose — black
+  from the *top* down represents the fabric hanging over the window (the
+  closed portion), white below is the open part letting light through. A
+  60%-open blind shows ~40% black from the top, ~60% white below. This icon
+  is also deliberately smaller (`COVER_ICON_SIZE`) than the lights/AC one
+  (`TILE_ICON_SIZE`/`AC_ICON_SIZE`) — a blind is a thin strip, not a tank
+  gauge.
+
+Icon sizes are **fixed pixel constants, not derived from tile/row height**.
+The first version sized them as `height - 20`, which looks fine in the
+concrete example it was tested against but silently breaks in two ways once
+you consider the actual range of real layouts: on a 4.7" panel at 960×540
+(~235ppi) a size scaled to fill a *tall* row (e.g. an AC tab with only 1-2
+units configured, giving each row 150-350px of height) produces a genuinely
+huge square, and on the AC row specifically the icon and the device name were
+both anchored to the same top-left corner, so a big enough icon there
+literally drew over the name. Fixed sizes plus a strict "icon lives in its own
+column, text lives in the other column" layout (rather than relying on the
+icon happening to be small) closes off that whole class of bug regardless of
+how many devices end up in a row.
+
+## Text size
+
+Bumped up across the board — this is a 4.7" panel at ~235ppi, so raw pixel
+sizes that look reasonable on a desktop mockup (`size=1`, `size=2`) render
+genuinely tiny in person. Rough scale now: `size=3` for the clock, tab labels,
+and modal choice buttons (the most glanceable/tappable things); `size=2` for
+everything else (names, state text, footer, small buttons). `_text_center_y()`
+centers a line of text vertically within a given band, used anywhere text
+needs to sit centered in a header/tab/button rather than at a fixed offset.
+
+## Grid: 8 tiles per page
+
+`GRID_COLS=2, GRID_ROWS=4` (was 3 rows / 6 tiles). Kept 2 columns rather than
+going wider, since device names need the horizontal room; the row count is
+what changed. This only works cleanly *because* icons are fixed-size now — a
+shorter tile (~80px vs. the old ~110px) would have made a height-scaled icon
+comically small, but a fixed 56px icon looks the same regardless.
+
+## Snappier taps: optimistic UI
+
+Toggling a light previously felt sluggish even though it's "just" a local HTTP
+call — because the code waited for the full request/response round trip
+*before* drawing anything, stacking network+backend time on top of the
+e-paper redraw time. Fixed for the three simple, frequent interactions
+(`switch_toggle`, `light_power`, `cover_cmd`): the tile is redrawn immediately
+with the *guessed* new state (the on/off value being requested, or
+opening/closing/stopped for covers), then the HTTP call fires, and the tile is
+redrawn *again* only if the real response disagrees with the guess or the call
+failed. In the common case there's exactly one redraw, and it happens before
+the network call, not after. AC actions deliberately keep the old
+wait-then-show-result behavior (with a visible "busy" state) instead of
+guessing, since a real ~10s BLE round trip isn't something to fake instant
+feedback for.
 
 ## Architecture: no background polling, every redraw is scoped
 

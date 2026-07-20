@@ -356,6 +356,14 @@ class AppState:
             return True
         return False
 
+    # --- lookup (used for optimistic UI updates - see handle_action) --------
+
+    def get_shelly_device(self, device_id):
+        for d in self.shelly_devices:
+            if d["id"] == device_id:
+                return d
+        return None
+
     # --- patch a single device from its own action's response ---------------
 
     def patch_shelly_device(self, response):
@@ -399,7 +407,7 @@ TABS_H = 60
 FOOTER_H = 30
 
 GRID_COLS = 2
-GRID_ROWS = 3
+GRID_ROWS = 4  # 8 tiles/page - kept 2 columns (not narrower) so device names have room
 TILE_PAD = 8
 
 
@@ -478,17 +486,32 @@ def hit_test(x, y, regions):
 MODE_LABELS = {"auto": "Auto", "cool": "Frio", "heat": "Calor", "dry": "Seco", "fan": "Vent."}
 FAN_LABELS = {"auto": "Auto", "low": "Low", "mid": "Mid", "high": "High"}
 
+# Icon sizes are fixed constants, NOT derived from tile/row height - a 4.7"
+# panel at 960x540 is ~235ppi, so a "square that fills the tile" scales into
+# something huge on tall rows (e.g. only 1-2 AC devices configured) and starts
+# overlapping the text drawn at fixed offsets from the top. Fixed sizes keep
+# icons proportionate regardless of how many devices are on screen.
+TILE_ICON_SIZE = 56
+AC_ICON_SIZE = 72
+COVER_ICON_SIZE = 40  # smaller than TILE_ICON_SIZE - a blind is a thin strip, not a big tank gauge
+
+
+def _text_center_y(y, h, size):
+    """Vertically center a line of `size`-scaled text (~8px tall per size
+    unit) within a region of height h starting at y."""
+    return y + h // 2 - 4 * size
+
 
 def draw_header(app):
     x, y, w, h = header_rect()
     fill_rect(x, y, w, h, WHITE)
-    draw_text(_clock_text(), x + 10, y + h // 2 - 8, size=2)
+    draw_text(_clock_text(), x + 10, _text_center_y(y, h, 3), size=3)
 
     if app.weather and app.weather.get("ok"):
         label = "%s C  %s" % (app.weather["temp_c"], app.weather["condition"])
     else:
         label = "Weather --"
-    draw_text(label, w - 260, y + h // 2 - 8, size=2)
+    draw_text(label, w - 340, _text_center_y(y, h, 2), size=2)
     return []
 
 
@@ -500,12 +523,13 @@ def draw_tabs(app):
     for i, tab in enumerate(tabs):
         rx, ry, rw, rh = tab_button_rect(i, len(tabs))
         active = tab == app.active_tab
+        label_y = _text_center_y(ry, rh, 3)
         if active:
             fill_rect(rx, ry, rw, rh, BLACK)
-            draw_text(TAB_LABELS[tab], rx + 12, ry + rh // 2 - 8, color=WHITE, size=2)
+            draw_text(TAB_LABELS[tab], rx + 16, label_y, color=WHITE, size=3)
         else:
             draw_rect(rx, ry, rw, rh, BLACK)
-            draw_text(TAB_LABELS[tab], rx + 12, ry + rh // 2 - 8, size=2)
+            draw_text(TAB_LABELS[tab], rx + 16, label_y, size=3)
         regions.append(((rx, ry, rw, rh), {"kind": "select_tab", "tab": tab}))
     return regions
 
@@ -531,12 +555,24 @@ def draw_device_grid(app, devices):
 def _draw_state_icon(icon_x, icon_y, icon_size, fill_fraction):
     """A square gauge: fills black from the bottom up by fill_fraction (0-1).
     fill_fraction=1 draws a fully filled (black) square, 0 a fully empty
-    (white/outline-only) one - used for on/off (0 or 1) and cover position
-    (0-1) alike."""
+    (white/outline-only) one - used for on/off state (lights, switches, AC
+    power)."""
     fill_h = int(icon_size * fill_fraction)
     fill_rect(icon_x, icon_y, icon_size, icon_size, WHITE)
     if fill_h > 0:
         fill_rect(icon_x, icon_y + icon_size - fill_h, icon_size, fill_h, BLACK)
+    draw_rect(icon_x, icon_y, icon_size, icon_size, BLACK)
+
+
+def _draw_blind_icon(icon_x, icon_y, icon_size, position_pct):
+    """A blind gauge - a different metaphor from _draw_state_icon on purpose:
+    black from the TOP down represents the fabric hanging over the window
+    (the closed portion), white below is the open part letting light through.
+    position_pct is 0 (closed) - 100 (open)."""
+    closed_h = int(icon_size * (100 - position_pct) / 100)
+    fill_rect(icon_x, icon_y, icon_size, icon_size, WHITE)
+    if closed_h > 0:
+        fill_rect(icon_x, icon_y, icon_size, closed_h, BLACK)
     draw_rect(icon_x, icon_y, icon_size, icon_size, BLACK)
 
 
@@ -545,21 +581,25 @@ def draw_device_tile(rect, device, busy):
     fill_rect(x, y, w, h, WHITE)
     draw_rect(x, y, w, h, BLACK)
     name = device.get("display_name") or device.get("name") or device["id"]
-    draw_text(name, x + 8, y + 8, size=1)
+    draw_text(name, x + 8, y + 6, size=2)
 
     if busy:
-        draw_text("...", x + 8, y + 28, size=2)
+        draw_text("...", x + 8, y + 26, size=2)
         return []
 
     component = device.get("component")
     regions = []
     device_id = device["id"]
 
-    icon_size = h - 20
-    icon_x = x + w - icon_size - 10
-    icon_y = y + (h - icon_size) // 2
+    # Icon on the right, name/state text on the left - a fixed icon size and a
+    # strict left/right column split (rather than sizing the icon off tile
+    # height) is what keeps the two from ever overlapping.
 
     if component == "cover":
+        icon_size = COVER_ICON_SIZE
+        icon_x = x + w - icon_size - 10
+        icon_y = y + (h - icon_size) // 2
+
         position = device.get("position")
         if isinstance(position, int):
             pct = position
@@ -568,38 +608,46 @@ def draw_device_tile(rect, device, busy):
             state = device.get("state")
             pct = 100 if state == "open" else 0 if state == "closed" else 50
             state_text = str(state or "?")
-        draw_text(state_text, x + 8, y + 28, size=2)
-        _draw_state_icon(icon_x, icon_y, icon_size, pct / 100)
+        draw_text(state_text, x + 8, y + 26, size=2)
+        _draw_blind_icon(icon_x, icon_y, icon_size, pct)
 
         btn_w = (icon_x - x) // 3
-        btn_y = y + h - 28
-        draw_text("Up", x + 4, btn_y, size=1)
-        draw_text("Stop", x + btn_w + 4, btn_y, size=1)
-        draw_text("Down", x + 2 * btn_w + 4, btn_y, size=1)
-        regions.append(((x, btn_y - 4, btn_w, 24), {"kind": "cover_cmd", "device_id": device_id, "command": "open"}))
-        regions.append(((x + btn_w, btn_y - 4, btn_w, 24), {"kind": "cover_cmd", "device_id": device_id, "command": "stop"}))
-        regions.append(((x + 2 * btn_w, btn_y - 4, btn_w, 24), {"kind": "cover_cmd", "device_id": device_id, "command": "close"}))
-        regions.append(((x, y, icon_x - x, h - 32), {"kind": "open_modal", "type": "position", "device_id": device_id}))
+        btn_y = y + h - 30
+        draw_text("Up", x + 4, btn_y, size=2)
+        draw_text("Stop", x + btn_w + 4, btn_y, size=2)
+        draw_text("Down", x + 2 * btn_w + 4, btn_y, size=2)
+        regions.append(((x, btn_y - 4, btn_w, 28), {"kind": "cover_cmd", "device_id": device_id, "command": "open"}))
+        regions.append(((x + btn_w, btn_y - 4, btn_w, 28), {"kind": "cover_cmd", "device_id": device_id, "command": "stop"}))
+        regions.append(((x + 2 * btn_w, btn_y - 4, btn_w, 28), {"kind": "cover_cmd", "device_id": device_id, "command": "close"}))
+        regions.append(((x, y, icon_x - x, btn_y - 4 - y), {"kind": "open_modal", "type": "position", "device_id": device_id}))
         regions.append(((icon_x, icon_y, icon_size, icon_size), {"kind": "open_modal", "type": "position", "device_id": device_id}))
 
     elif component == "light":
+        icon_size = TILE_ICON_SIZE
+        icon_x = x + w - icon_size - 10
+        icon_y = y + (h - icon_size) // 2
+
         is_on = device.get("state") == "on"
         brightness = device.get("brightness")
         state_text = "%s%%" % brightness if isinstance(brightness, int) else ("On" if is_on else "Off")
-        draw_text(state_text, x + 8, y + 28, size=2)
-        _draw_state_icon(icon_x, icon_y, icon_size, 1 if is_on else 0)
+        draw_text(state_text, x + 8, y + 26, size=2)
+        _draw_state_icon(icon_x, icon_y, icon_size, 0 if is_on else 1)  # white=on, black=off, per user preference
 
-        pct_rect = (x + 8, y + h - 26, 50, 22)
-        draw_text("%", pct_rect[0] + 18, pct_rect[1] + 2, size=1)
+        pct_rect = (x + 8, y + h - 30, 50, 26)
+        draw_text("%", pct_rect[0] + 18, pct_rect[1] + 4, size=2)
         next_command = "off" if is_on else "on"
         regions.append(((x, y, w, h), {"kind": "light_power", "device_id": device_id, "command": next_command}))
         regions.append((pct_rect, {"kind": "open_modal", "type": "brightness", "device_id": device_id}))
 
     else:  # switch/relay
+        icon_size = TILE_ICON_SIZE
+        icon_x = x + w - icon_size - 10
+        icon_y = y + (h - icon_size) // 2
+
         is_on = device.get("state") == "on"
         state_text = "On" if is_on else "Off"
-        draw_text(state_text, x + 8, y + 28, size=2)
-        _draw_state_icon(icon_x, icon_y, icon_size, 1 if is_on else 0)
+        draw_text(state_text, x + 8, y + 26, size=2)
+        _draw_state_icon(icon_x, icon_y, icon_size, 0 if is_on else 1)  # white=on, black=off, per user preference
         regions.append(((x, y, w, h), {"kind": "switch_toggle", "device_id": device_id}))
 
     return regions
@@ -618,44 +666,53 @@ def draw_ac_row(rect, device, busy):
     x, y, w, h = rect
     fill_rect(x, y, w, h, WHITE)
     draw_rect(x, y, w, h, BLACK)
-    name = device.get("display_name") or device.get("name") or device["id"]
-    draw_text(name, x + 8, y + 6, size=1)
-    draw_text("Refresh", x + w - 60, y + 6, size=1)
     device_id = device["id"]
 
+    # Icon is fixed-size (clamped to the row's actual height, since AC row
+    # height varies a lot with device count - as few as 1, or all 4) and on
+    # the left; all text (including the name) lives in the info column to its
+    # right - the name used to be drawn at (x+8), directly on top of where
+    # this same-side icon renders, which is the actual "square covering the
+    # text" bug for AC rows specifically.
+    icon_size = min(AC_ICON_SIZE, h - 10)
+    icon_x = x + 10
+    icon_y = y + max(0, (h - icon_size) // 2)
+    info_x = icon_x + icon_size + 14
+
+    name = device.get("display_name") or device.get("name") or device["id"]
+    draw_text(name, info_x, y + 6, size=2)
+    draw_text("Sync", x + w - 60, y + 6, size=2)
+
     if busy:
-        draw_text("... (BLE call in progress, ~10s)", x + 8, y + h // 2 - 8, size=1)
+        draw_text("... (~10s)", info_x, y + 30, size=2)
         return [((x + w - 70, y, 70, 24), {"kind": "ac_live_refresh", "device_id": device_id})]
 
     power = device.get("power")
     is_on = bool(power)
     next_state = "off" if is_on else "on"
-
-    # Big power icon, left side, spans nearly the full row height - the main
-    # on/off indicator and tap target, not a small text button.
-    icon_size = h - 20
-    icon_x = x + 10
-    icon_y = y + (h - icon_size) // 2
     _draw_state_icon(icon_x, icon_y, icon_size, 1 if is_on else 0)
-
-    info_x = icon_x + icon_size + 14
 
     setpoint = device.get("setpoint")
     current = device.get("current_temp")
-    temps = "%s / %s" % (current if current is not None else "--", setpoint if setpoint is not None else "--")
     mode_label = MODE_LABELS.get(device.get("mode"), "--")
     fan_label = FAN_LABELS.get(device.get("fan_speed"), "--")
-
-    draw_text(temps, info_x, y + 26, size=2)
-    draw_text("Mode: " + mode_label, info_x, y + 50, size=1)
-    draw_text("Fan: " + fan_label, info_x, y + 66, size=1)
+    # One combined line, not three stacked ones - AC rows can be as short as
+    # ~80px when all 4 units are configured, not enough room for separate
+    # temps/mode/fan lines without them colliding with the button row below.
+    info_line = "%s/%s  %s  Fan %s" % (
+        current if current is not None else "--",
+        setpoint if setpoint is not None else "--",
+        mode_label,
+        fan_label,
+    )
+    draw_text(info_line, info_x, y + 30, size=2)
 
     btn_w = (x + w - info_x) // 3
-    btn_h = 30
-    btn_y = y + h - btn_h - 6
-    draw_text("Set", info_x + 8, btn_y + 8, size=1)
-    draw_text("Mode", info_x + btn_w + 8, btn_y + 8, size=1)
-    draw_text("Fan", info_x + 2 * btn_w + 8, btn_y + 8, size=1)
+    btn_h = 26
+    btn_y = y + h - btn_h - 4
+    draw_text("Set", info_x + 8, btn_y + 4, size=2)
+    draw_text("Mode", info_x + btn_w + 8, btn_y + 4, size=2)
+    draw_text("Fan", info_x + 2 * btn_w + 8, btn_y + 4, size=2)
 
     return [
         ((icon_x, icon_y, icon_size, icon_size), {"kind": "ac_power", "device_id": device_id, "state": next_state}),
@@ -690,12 +747,12 @@ def draw_modal(app):
         by = y + 40 + i * (btn_h + 10)
         label = MODE_LABELS.get(choice, FAN_LABELS.get(choice, str(choice)))
         draw_rect(x + 20, by, w - 40, btn_h, BLACK)
-        draw_text(label, x + 32, by + 16, size=2)
+        draw_text(label, x + 32, _text_center_y(by, btn_h, 3), size=3)
         regions.append(((x + 20, by, w - 40, btn_h), {"kind": "modal_choice", "value": choice}))
 
     close_y = y + h - 50
     draw_rect(x + 20, close_y, w - 40, 40, BLACK)
-    draw_text("Close", x + 32, close_y + 10, size=2)
+    draw_text("Close", x + 32, _text_center_y(close_y, 40, 3), size=3)
     regions.append(((x + 20, close_y, w - 40, 40), {"kind": "close_modal"}))
     return regions
 
@@ -704,7 +761,7 @@ def draw_footer(app):
     x, y, w, h = footer_rect()
     fill_rect(x, y, w, h, WHITE)
     status = "Online" if app.online else "Offline - showing last known state"
-    draw_text(status, x + 8, y + 6, size=1)
+    draw_text(status, x + 8, _text_center_y(y, h, 2), size=2)
 
     regions = []
     if app.active_tab in (TAB_LIGHTS, TAB_COVERS):
@@ -712,7 +769,7 @@ def draw_footer(app):
         per_page = page_size()
         if len(devices) > per_page:
             total_pages = (len(devices) + per_page - 1) // per_page
-            draw_text("Page %s/%s" % (app.page + 1, total_pages), w // 2 - 40, y + 6, size=1)
+            draw_text("Page %s/%s" % (app.page + 1, total_pages), w // 2 - 50, _text_center_y(y, h, 2), size=2)
             regions.append(((x + w - 140, y, 60, h), {"kind": "page", "delta": -1}))
             regions.append(((x + w - 70, y, 60, h), {"kind": "page", "delta": 1}))
     return regions
@@ -890,19 +947,48 @@ def handle_action(action):
         redraw()
 
     elif kind == "switch_toggle":
+        # Optimistic UI: draw the guessed new state immediately, before the
+        # HTTP round trip, so the tap feels instant - then only redraw again
+        # if the real response disagrees (or failed). Waiting for the
+        # network response before drawing anything was the actual cause of
+        # "not snappy": the visible delay was network+backend time stacked
+        # on top of the e-paper redraw, instead of just the redraw.
         device_id = action["device_id"]
-        app.patch_shelly_device(shelly_action(device_id, "toggle"))
-        redraw_tile(device_id)
+        device = app.get_shelly_device(device_id)
+        guess = None
+        if device:
+            guess = "off" if device.get("state") == "on" else "on"
+            device["state"] = guess
+            redraw_tile(device_id)
+        response = shelly_action(device_id, "toggle")
+        app.patch_shelly_device(response)
+        if not (response.get("ok") and response.get("state") == guess):
+            redraw_tile(device_id)
 
     elif kind == "light_power":
         device_id = action["device_id"]
-        app.patch_shelly_device(shelly_light_action(device_id, action["command"]))
-        redraw_tile(device_id)
+        command = action["command"]
+        device = app.get_shelly_device(device_id)
+        if device:
+            device["state"] = command  # optimistic - see switch_toggle above
+            redraw_tile(device_id)
+        response = shelly_light_action(device_id, command)
+        app.patch_shelly_device(response)
+        if not (response.get("ok") and response.get("state") == command):
+            redraw_tile(device_id)
 
     elif kind == "cover_cmd":
         device_id = action["device_id"]
-        app.patch_shelly_device(shelly_cover_action(device_id, action["command"]))
-        redraw_tile(device_id)
+        command = action["command"]
+        guess = {"open": "opening", "close": "closing", "stop": "stopped"}.get(command)
+        device = app.get_shelly_device(device_id)
+        if device and guess:
+            device["state"] = guess  # optimistic - see switch_toggle above
+            redraw_tile(device_id)
+        response = shelly_cover_action(device_id, command)
+        app.patch_shelly_device(response)
+        if not (response.get("ok") and response.get("state") == guess):
+            redraw_tile(device_id)
 
     elif kind == "ac_power":
         device_id = action["device_id"]
