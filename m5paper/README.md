@@ -27,20 +27,26 @@ at all, paste it into the code editor instead and use **Run Always** — UIFlow2
 writes whatever you deploy that way to `main.py`, which auto-runs at boot. Both
 paths work; pick whichever fits how you want to use the device.
 
-## Two things worth confirming the first time you run it
+## Confirmed on real hardware so far
 
-Everything hardware-facing (display calls, e-paper refresh-mode API, touch API
-— see the "Hardware" section near the top of the file) was checked against the
-official UIFlow2 MicroPython docs, not guessed. Two things weren't confirmable
-from docs alone, so watch for these on first run:
+- **HTTP client is `requests2`, not `urequests`.** The first version of this
+  app used `urequests`, which crashed immediately with
+  `ImportError: no module named 'urequests'` — UIFlow2 renamed/replaced it
+  platform-wide. Fixed; the API client section now uses `requests2.get/post`
+  with a `json=` body instead of manually building one.
+- **No client-side HTTP timeout.** `requests2`'s documented signature has no
+  `timeout` parameter, so this app doesn't pass one (the whole `urequests`
+  crash above was exactly this class of mistake — guessing at an unsupported
+  kwarg — so it isn't worth repeating). In practice this is bounded by the
+  Flask backend's own response times (fast for Shelly, ~25s worst case for
+  Daikin), except a *fully unreachable* server, which could hang a request
+  with no way for this app to detect or cancel it.
 
-- **`urequests` timeout support.** The API client section passes `timeout=` to
-  `urequests.get/post`. If this firmware's bundled `urequests` doesn't accept
-  that kwarg, every call fails immediately and the panel just shows "Offline"
-  — easy to spot, and would mean every screen looks empty/stale from the start.
-- **Whether draws batch into one atomic screen update, or each shape/text call
-  visibly flashes individually** during a redraw. Not a bug either way — worst
-  case is a slightly busier-looking refresh.
+## One thing still worth watching for
+
+Whether draws batch into one atomic screen update, or each shape/text call
+visibly flashes the panel individually during a redraw. Not a bug either way —
+worst case is a slightly busier-looking refresh than necessary.
 
 Also: the clock reads the device's RTC, which UIFlow2 normally syncs via NTP at
 boot. If the clock shows a wrong/zero time, that's a device time-sync issue,

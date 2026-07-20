@@ -15,8 +15,7 @@
 import time
 
 import M5
-import ujson
-import urequests
+import requests2
 from M5 import Lcd, Touch
 
 
@@ -32,10 +31,6 @@ SERVER_URL = "http://192.168.1.50:5000"
 SHELLY_POLL_MS = 30000
 AC_POLL_MS = 30000
 WEATHER_POLL_MS = 900000
-
-# HTTP timeouts, in seconds. Daikin calls are slow on purpose (real BLE round trip).
-HTTP_TIMEOUT_FAST = 10
-HTTP_TIMEOUT_DAIKIN = 30
 
 # Force a full (flash) e-paper refresh every N partial refreshes, to clear ghosting.
 FULL_REFRESH_EVERY = 20
@@ -120,14 +115,24 @@ def poll_touch():
 
 
 # ============================================================
-# Flask API client - thin urequests wrapper.
+# Flask API client - thin requests2 wrapper (requests2 is UIFlow2's own HTTP
+# client; it replaced urequests platform-wide, confirmed on-device - urequests
+# doesn't exist on this firmware at all).
 #
 # Mirrors skills/shelly.md, skills/daikin.md and skills/weather.md. Every
 # function returns whatever the backend returned, parsed from JSON. Network-level
-# failures (timeout, no route, connection refused) are caught here and turned
-# into the same {"ok": False, "error": ...} shape the backend itself uses for
-# failures, so callers never need to special-case "the server said no" vs. "we
-# couldn't reach the server".
+# failures (no route, connection refused) are caught here and turned into the
+# same {"ok": False, "error": ...} shape the backend itself uses for failures,
+# so callers never need to special-case "the server said no" vs. "we couldn't
+# reach the server".
+#
+# No client-side timeout: requests2's documented signature doesn't have a
+# timeout parameter, and guessing at an unsupported kwarg is exactly the kind
+# of mistake that broke urequests in the first place. In practice this is
+# bounded by the Flask backend's own response times (fast for Shelly, ~25s
+# worst case for Daikin thanks to its ble_lock_timeout) - the only real gap is
+# a fully unreachable server (not erroring, just gone), which could hang a
+# request with no way for this app to detect or cancel it.
 #
 # Two endpoints (get_shelly_configured, get_daikin_devices) return a bare JSON
 # array on success rather than a dict - on a network failure they still return
@@ -136,9 +141,9 @@ def poll_touch():
 # ============================================================
 
 
-def _get(path, timeout):
+def _get(path):
     try:
-        resp = urequests.get(SERVER_URL + path, timeout=timeout)
+        resp = requests2.get(SERVER_URL + path)
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
     try:
@@ -148,14 +153,9 @@ def _get(path, timeout):
     return data
 
 
-def _post(path, body, timeout):
+def _post(path, body):
     try:
-        resp = urequests.post(
-            SERVER_URL + path,
-            data=ujson.dumps(body),
-            headers={"Content-Type": "application/json"},
-            timeout=timeout,
-        )
+        resp = requests2.post(SERVER_URL + path, json=body, headers={"Content-Type": "application/json"})
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
     try:
@@ -166,62 +166,62 @@ def _post(path, body, timeout):
 
 
 def get_shelly_configured():
-    return _get("/api/shelly/configured", HTTP_TIMEOUT_FAST)
+    return _get("/api/shelly/configured")
 
 
 def get_shelly_devices():
-    return _get("/api/shelly/devices", HTTP_TIMEOUT_FAST)
+    return _get("/api/shelly/devices")
 
 
 def shelly_action(device_id, action):
-    return _post("/api/shelly/%s/action" % device_id, {"action": action}, HTTP_TIMEOUT_FAST)
+    return _post("/api/shelly/%s/action" % device_id, {"action": action})
 
 
 def shelly_cover_action(device_id, command):
-    return _post("/api/shelly/%s/cover_action" % device_id, {"command": command}, HTTP_TIMEOUT_FAST)
+    return _post("/api/shelly/%s/cover_action" % device_id, {"command": command})
 
 
 def shelly_position(device_id, position):
-    return _post("/api/shelly/%s/position" % device_id, {"position": position}, HTTP_TIMEOUT_FAST)
+    return _post("/api/shelly/%s/position" % device_id, {"position": position})
 
 
 def shelly_light_action(device_id, command):
-    return _post("/api/shelly/%s/light_action" % device_id, {"command": command}, HTTP_TIMEOUT_FAST)
+    return _post("/api/shelly/%s/light_action" % device_id, {"command": command})
 
 
 def shelly_light_level(device_id, brightness):
-    return _post("/api/shelly/%s/light_level" % device_id, {"brightness": brightness}, HTTP_TIMEOUT_FAST)
+    return _post("/api/shelly/%s/light_level" % device_id, {"brightness": brightness})
 
 
 def get_daikin_devices():
-    return _get("/api/daikin/devices", HTTP_TIMEOUT_FAST)
+    return _get("/api/daikin/devices")
 
 
 def get_daikin_status(device_id, live=False):
     path = "/api/daikin/%s/status" % device_id
     if live:
         path += "?live=1"
-    return _get(path, HTTP_TIMEOUT_DAIKIN)
+    return _get(path)
 
 
 def daikin_power(device_id, state):
-    return _post("/api/daikin/%s/power" % device_id, {"state": state}, HTTP_TIMEOUT_DAIKIN)
+    return _post("/api/daikin/%s/power" % device_id, {"state": state})
 
 
 def daikin_mode(device_id, mode):
-    return _post("/api/daikin/%s/mode" % device_id, {"mode": mode}, HTTP_TIMEOUT_DAIKIN)
+    return _post("/api/daikin/%s/mode" % device_id, {"mode": mode})
 
 
 def daikin_setpoint(device_id, temperature):
-    return _post("/api/daikin/%s/setpoint" % device_id, {"temperature": temperature}, HTTP_TIMEOUT_DAIKIN)
+    return _post("/api/daikin/%s/setpoint" % device_id, {"temperature": temperature})
 
 
 def daikin_fan(device_id, speed):
-    return _post("/api/daikin/%s/fan" % device_id, {"speed": speed}, HTTP_TIMEOUT_DAIKIN)
+    return _post("/api/daikin/%s/fan" % device_id, {"speed": speed})
 
 
 def get_weather():
-    return _get("/api/weather", HTTP_TIMEOUT_FAST)
+    return _get("/api/weather")
 
 
 # ============================================================
