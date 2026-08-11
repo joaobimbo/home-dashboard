@@ -1,20 +1,12 @@
 [
   {
-    "id": "s3sw-001p8eu-10-192-168-1-10-switch-0",
-    "device_name": "S3SW-001P8EU 10",
-    "display_name": "Escritorio",
-    "other_names": ["office light", "luz escritorio"],
-    "room": "Casa",
-    "host": "192.168.1.10",
-    "component": "switch",
-    "relay": 0,
-    "image": ""
-  },
-  {
-    "id": "s3sw-001p8eu-13-192-168-1-13-switch-0",
+    "id": "quarto-1",
     "device_name": "S3SW-001P8EU 13",
     "display_name": "Quarto 1",
-    "other_names": ["meu quarto", "Room 1"],
+    "other_names": [
+      "meu quarto",
+      "Room 1"
+    ],
     "room": "Casa",
     "host": "192.168.1.13",
     "component": "switch",
@@ -22,10 +14,12 @@
     "image": ""
   },
   {
-    "id": "s3sw-001p8eu-14-192-168-1-14-switch-0",
+    "id": "corredor",
     "device_name": "S3SW-001P8EU 14",
     "display_name": "Corredor",
-    "other_names": ["corridor light"],
+    "other_names": [
+      "corridor light"
+    ],
     "room": "Casa",
     "host": "192.168.1.14",
     "component": "switch",
@@ -33,10 +27,12 @@
     "image": ""
   },
   {
-    "id": "s3sw-002p16eu-16-192-168-1-16-cover-0",
+    "id": "estore-sala",
     "device_name": "S3SW-002P16EU 16",
     "display_name": "Estore Sala",
-    "other_names": ["living room window"],
+    "other_names": [
+      "living room window"
+    ],
     "room": "Casa",
     "host": "192.168.1.16",
     "component": "cover",
@@ -44,10 +40,12 @@
     "image": ""
   },
   {
-    "id": "s3sw-002p16eu-2-192-168-1-2-cover-0",
+    "id": "estore-quarto-1a",
     "device_name": "S3SW-002P16EU 2",
     "display_name": "Estore Quarto 1A",
-    "other_names": ["Room 1 blinders A"],
+    "other_names": [
+      "Room 1 blinders A"
+    ],
     "room": "Casa",
     "host": "192.168.1.2",
     "component": "cover",
@@ -55,10 +53,35 @@
     "image": ""
   },
   {
-    "id": "s3sw-001p8eu-3-192-168-1-3-switch-0",
+    "id": "s3bl-c010007aeu-223-192-168-1-223-switch-0",
+    "device_name": "S3BL-C010007AEU 223",
+    "display_name": "Luz RGB Sala",
+    "other_names": [],
+    "room": "Casa",
+    "host": "192.168.1.223",
+    "component": "light",
+    "relay": 0,
+    "image": ""
+  },
+  {
+    "id": "s3dm-0a101wwl-224-192-168-1-224-light-0",
+    "device_name": "S3DM-0A101WWL 224",
+    "display_name": "Luz Escritorio",
+    "other_names": [],
+    "room": "Casa",
+    "host": "192.168.1.224",
+    "component": "light",
+    "relay": 0,
+    "image": ""
+  },
+  {
+    "id": "quarto-2",
     "device_name": "S3SW-001P8EU 3",
     "display_name": "Quarto 2",
-    "other_names": ["quarto hospedes", "guest room"],
+    "other_names": [
+      "quarto hospedes",
+      "guest room"
+    ],
     "room": "Casa",
     "host": "192.168.1.3",
     "component": "switch",
@@ -66,10 +89,12 @@
     "image": ""
   },
   {
-    "id": "s3dm-0a101wwl-4-192-168-1-4-light-0",
+    "id": "luz-sala",
     "device_name": "S3DM-0A101WWL 4",
     "display_name": "Luz Sala",
-    "other_names": ["living room"],
+    "other_names": [
+      "living room"
+    ],
     "room": "Casa",
     "host": "192.168.1.4",
     "component": "light",
@@ -77,10 +102,12 @@
     "image": ""
   },
   {
-    "id": "s3sw-002p16eu-5-192-168-1-5-cover-0",
+    "id": "estore-quarto-1-b",
     "device_name": "S3SW-002P16EU 5",
     "display_name": "Estore Quarto 1 B",
-    "other_names": ["Room 1 blinders B"],
+    "other_names": [
+      "Room 1 blinders B"
+    ],
     "room": "Casa",
     "host": "192.168.1.5",
     "component": "cover",
@@ -88,10 +115,13 @@
     "image": ""
   },
   {
-    "id": "s3sw-002p16eu-6-192-168-1-6-cover-0",
+    "id": "estore-escritorio",
     "device_name": "S3SW-002P16EU 6",
     "display_name": "Estore Escritorio",
-    "other_names": ["office window", "office blinder"],
+    "other_names": [
+      "office window",
+      "office blinder"
+    ],
     "room": "Casa",
     "host": "192.168.1.6",
     "component": "cover",
@@ -99,10 +129,12 @@
     "image": ""
   },
   {
-    "id": "snsw-102p16eu-7-192-168-1-7-cover-0",
+    "id": "estore-quarto-2",
     "device_name": "SNSW-102P16EU 7",
     "display_name": "Estore Quarto 2",
-    "other_names": ["guest room blinders"],
+    "other_names": [
+      "guest room blinders"
+    ],
     "room": "Casa",
     "host": "192.168.1.7",
     "component": "cover",
@@ -110,10 +142,12 @@
     "image": ""
   },
   {
-    "id": "s3sw-002p16eu-8-192-168-1-8-switch-0",
+    "id": "cozinha-mesa",
     "device_name": "S3SW-002P16EU 8",
     "display_name": "Cozinha Mesa",
-    "other_names": ["kitchen table"],
+    "other_names": [
+      "kitchen table"
+    ],
     "room": "Casa",
     "host": "192.168.1.8",
     "component": "switch",
@@ -121,10 +155,12 @@
     "image": ""
   },
   {
-    "id": "s3sw-002p16eu-8-192-168-1-8-switch-1",
+    "id": "cozinha",
     "device_name": "S3SW-002P16EU 8",
     "display_name": "Cozinha",
-    "other_names": ["kitchen"],
+    "other_names": [
+      "kitchen"
+    ],
     "room": "Casa",
     "host": "192.168.1.8",
     "component": "switch",
@@ -132,10 +168,12 @@
     "image": ""
   },
   {
-    "id": "s3sw-001p8eu-9-192-168-1-9-switch-0",
+    "id": "luz-hall",
     "device_name": "S3SW-001P8EU 9",
     "display_name": "Luz Hall",
-    "other_names": ["hall"],
+    "other_names": [
+      "hall"
+    ],
     "room": "Casa",
     "host": "192.168.1.9",
     "component": "switch",

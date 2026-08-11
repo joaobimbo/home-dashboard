@@ -1,14 +1,5 @@
 [
   {
-    "id": "ac-escritorio-b4-cb-b8-7b-32-90",
-    "display_name": "AC Escritorio",
-    "other_names": [],
-    "room": "Escritorio",
-    "address": "B4:CB:B8:7B:32:90",
-    "adapter": "hci0",
-    "image": ""
-  },
-  {
     "id": "ac-sala-b4-cb-b8-7a-25-47",
     "display_name": "AC Sala",
     "other_names": [],
@@ -27,13 +18,21 @@
     "image": ""
   },
   {
+    "id": "ac-escritorio-b4-cb-b8-7b-32-90",
+    "display_name": "AC Escritorio",
+    "other_names": [],
+    "room": "Casa",
+    "address": "B4:CB:B8:7B:32:90",
+    "adapter": "hci0",
+    "image": ""
+  },
+  {
     "id": "ac-quarto-b8-c0-65-e8-45-63",
     "display_name": "AC Quarto",
     "other_names": [],
-    "room": "Quarto",
+    "room": "Casa",
     "address": "B8:C0:65:E8:45:63",
     "adapter": "hci0",
     "image": ""
   }
 ]
-
