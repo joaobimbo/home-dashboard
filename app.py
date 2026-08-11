@@ -216,7 +216,7 @@ def daikin_fan(device_id):
 
 @app.route("/screen/off", methods=["GET","POST"])
 def screen_off():
-    subprocess.run(["xset","dpms","force","off"])
+    subprocess.run(["xset", "-display", ":0", "dpms","force","off"])
     return {"ok": True}
 
 if __name__ == "__main__":
