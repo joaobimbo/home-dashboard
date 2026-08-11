@@ -2,3 +2,7 @@ __pycache__/
 *.py[cod]
 .venv_pyserver/
 .ruff_cache/
+var/
+automations/
+.env
+*.env

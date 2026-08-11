@@ -18,6 +18,17 @@
   var lightModalPresets = document.getElementById("light-modal-presets");
   var lightModalCancel = document.getElementById("light-modal-cancel");
   var lightModalSave = document.getElementById("light-modal-save");
+  var rgbModal = document.getElementById("rgb-modal");
+  var rgbModalPreview = document.getElementById("rgb-modal-preview");
+  var rgbModalColorValue = document.getElementById("rgb-modal-color-value");
+  var rgbModalHue = document.getElementById("rgb-modal-hue");
+  var rgbModalSaturation = document.getElementById("rgb-modal-saturation");
+  var rgbModalSaturationValue = document.getElementById("rgb-modal-saturation-value");
+  var rgbModalBrightness = document.getElementById("rgb-modal-brightness");
+  var rgbModalBrightnessValue = document.getElementById("rgb-modal-brightness-value");
+  var rgbModalPresets = document.getElementById("rgb-modal-presets");
+  var rgbModalCancel = document.getElementById("rgb-modal-cancel");
+  var rgbModalSave = document.getElementById("rgb-modal-save");
   var acSetpointModal = document.getElementById("ac-setpoint-modal");
   var acSetpointModalValue = document.getElementById("ac-setpoint-modal-value");
   var acSetpointModalSlider = document.getElementById("ac-setpoint-modal-slider");
@@ -36,6 +47,8 @@
   var acStatusTimer = null;
   var activeCoverCard = null;
   var activeLightCard = null;
+  var activeRgbCard = null;
+  var selectedRgb = [255, 255, 255];
   var activeAcCard = null;
   var touchStartX = 0;
   var touchStartY = 0;
@@ -152,6 +165,25 @@
       ? "webkitvisibilitychange"
       : null;
 
+  function clampByte(value) {
+    var parsed = parseInt(value, 10);
+    if (isNaN(parsed)) {
+      return 0;
+    }
+    return Math.max(0, Math.min(255, parsed));
+  }
+
+  function normalizeRgb(rgb) {
+    if (!rgb || rgb.length !== 3) {
+      return [255, 255, 255];
+    }
+    return [clampByte(rgb[0]), clampByte(rgb[1]), clampByte(rgb[2])];
+  }
+
+  function rgbCss(rgb) {
+    return "rgb(" + rgb[0] + ", " + rgb[1] + ", " + rgb[2] + ")";
+  }
+
   function paintCard(card, info) {
     var stateNode = card.querySelector("[data-state]");
     var component = (card.getAttribute("data-component") || "relay").toLowerCase();
@@ -203,6 +235,35 @@
       return;
     }
 
+    if (component === "rgbcct") {
+      var rgb = normalizeRgb(info.rgb);
+      var swatch = card.querySelector("[data-rgb-card-swatch]");
+      var brightness = typeof info.brightness === "number"
+        ? Math.max(1, Math.min(100, Math.round(info.brightness)))
+        : 100;
+
+      card.setAttribute("data-rgb-red", String(rgb[0]));
+      card.setAttribute("data-rgb-green", String(rgb[1]));
+      card.setAttribute("data-rgb-blue", String(rgb[2]));
+      card.setAttribute("data-rgb-brightness", String(brightness));
+
+      if (swatch) {
+        swatch.style.backgroundColor = rgbCss(rgb);
+        swatch.style.opacity = info.state === "on" ? "1" : "0.4";
+      }
+
+      if (info.state === "on") {
+        stateNode.textContent = String(brightness) + "%";
+        card.classList.add("is-on");
+        stateNode.classList.add("is-on");
+      } else {
+        stateNode.textContent = "Off";
+        card.classList.add("is-off");
+        stateNode.classList.add("is-off");
+      }
+      return;
+    }
+
     if (info.state === "on") {
       stateNode.textContent = "On";
       card.classList.add("is-on");
@@ -242,6 +303,148 @@
     }
     lightModal.hidden = true;
     activeLightCard = null;
+  }
+
+  function closeRgbModal() {
+    if (!rgbModal) {
+      return;
+    }
+    rgbModal.hidden = true;
+    activeRgbCard = null;
+  }
+
+  function rgbToHsv(rgb) {
+    var red = rgb[0] / 255;
+    var green = rgb[1] / 255;
+    var blue = rgb[2] / 255;
+    var maxValue = Math.max(red, green, blue);
+    var minValue = Math.min(red, green, blue);
+    var difference = maxValue - minValue;
+    var hue = 0;
+    var saturation = maxValue === 0 ? 0 : difference / maxValue;
+
+    if (difference !== 0) {
+      if (maxValue === red) {
+        hue = 60 * (((green - blue) / difference) % 6);
+      } else if (maxValue === green) {
+        hue = 60 * (((blue - red) / difference) + 2);
+      } else {
+        hue = 60 * (((red - green) / difference) + 4);
+      }
+    }
+    if (hue < 0) {
+      hue += 360;
+    }
+    return { hue: Math.round(hue), saturation: Math.round(saturation * 100) };
+  }
+
+  function hsvToRgb(hue, saturation) {
+    var normalizedHue = ((hue % 360) + 360) % 360;
+    var normalizedSaturation = Math.max(0, Math.min(100, saturation)) / 100;
+    var chroma = normalizedSaturation;
+    var second = chroma * (1 - Math.abs(((normalizedHue / 60) % 2) - 1));
+    var match = 1 - chroma;
+    var red = 0;
+    var green = 0;
+    var blue = 0;
+
+    if (normalizedHue < 60) {
+      red = chroma;
+      green = second;
+    } else if (normalizedHue < 120) {
+      red = second;
+      green = chroma;
+    } else if (normalizedHue < 180) {
+      green = chroma;
+      blue = second;
+    } else if (normalizedHue < 240) {
+      green = second;
+      blue = chroma;
+    } else if (normalizedHue < 300) {
+      red = second;
+      blue = chroma;
+    } else {
+      red = chroma;
+      blue = second;
+    }
+
+    return [
+      Math.round((red + match) * 255),
+      Math.round((green + match) * 255),
+      Math.round((blue + match) * 255)
+    ];
+  }
+
+  function paintRgbModal() {
+    var hue;
+    var fullColor;
+    if (!rgbModalHue || !rgbModalSaturation) {
+      return;
+    }
+    hue = parseInt(rgbModalHue.value, 10) || 0;
+    fullColor = hsvToRgb(hue, 100);
+    if (rgbModalPreview) {
+      rgbModalPreview.style.backgroundColor = rgbCss(selectedRgb);
+    }
+    if (rgbModalColorValue) {
+      rgbModalColorValue.textContent = rgbCss(selectedRgb);
+    }
+    if (rgbModalSaturationValue) {
+      rgbModalSaturationValue.textContent = String(rgbModalSaturation.value) + "%";
+    }
+    if (rgbModalSaturation) {
+      rgbModalSaturation.style.background =
+        "linear-gradient(to right, rgb(255, 255, 255), " + rgbCss(fullColor) + ")";
+    }
+  }
+
+  function setRgbSelection(rgb) {
+    var hsv;
+    selectedRgb = normalizeRgb(rgb);
+    hsv = rgbToHsv(selectedRgb);
+    if (rgbModalHue) {
+      rgbModalHue.value = String(hsv.hue);
+    }
+    if (rgbModalSaturation) {
+      rgbModalSaturation.value = String(hsv.saturation);
+    }
+    paintRgbModal();
+  }
+
+  function updateRgbFromSliders() {
+    var hue = parseInt(rgbModalHue ? rgbModalHue.value : "0", 10) || 0;
+    var saturation = parseInt(rgbModalSaturation ? rgbModalSaturation.value : "0", 10) || 0;
+    selectedRgb = hsvToRgb(hue, saturation);
+    paintRgbModal();
+  }
+
+  function openRgbModal(card) {
+    var red;
+    var green;
+    var blue;
+    var brightness;
+    if (!rgbModal || !rgbModalBrightness || !rgbModalBrightnessValue) {
+      return;
+    }
+    red = card.getAttribute("data-rgb-red");
+    green = card.getAttribute("data-rgb-green");
+    blue = card.getAttribute("data-rgb-blue");
+    if (red === null || green === null || blue === null) {
+      red = 255;
+      green = 255;
+      blue = 255;
+    }
+    brightness = parseInt(card.getAttribute("data-rgb-brightness"), 10);
+    if (isNaN(brightness)) {
+      brightness = 100;
+    }
+    brightness = Math.max(1, Math.min(100, brightness));
+    activeRgbCard = card;
+    rgbModalBrightness.value = String(brightness);
+    rgbModalBrightnessValue.textContent = String(brightness) + "%";
+    setRgbSelection([red, green, blue]);
+    rgbModal.hidden = false;
+    debugLog("Open RGB modal for " + card.getAttribute("data-device-id"));
   }
 
   function openCoverModal(card) {
@@ -311,9 +514,25 @@
     );
   }
 
+  function setRgbColor(card, rgb, brightness) {
+    card.disabled = true;
+    card.classList.add("is-busy");
+    requestJSON(
+      "POST",
+      "/api/shelly/" + card.getAttribute("data-device-id") + "/rgbcct",
+      { on: true, brightness: brightness, mode: "rgb", rgb: rgb },
+      function (_err, result) {
+        paintCard(card, _err ? null : result);
+        card.disabled = false;
+        card.classList.remove("is-busy");
+      }
+    );
+  }
+
   function handleDeviceListActivate(target) {
     var coverCmd = closestWithAttr(target, "data-cover-cmd");
     var lightSet = closestWithAttr(target, "data-light-set");
+    var rgbSet = closestWithAttr(target, "data-rgb-set");
     var card = closestWithAttr(target, "data-device-id");
     var component;
 
@@ -344,6 +563,12 @@
     if (lightSet) {
       debugLog("light % pressed");
       openLightModal(card);
+      return;
+    }
+
+    if (rgbSet) {
+      debugLog("RGB settings pressed");
+      openRgbModal(card);
       return;
     }
 
@@ -916,7 +1141,8 @@
       handleDeviceListActivate(event.target);
       if (
         closestWithAttr(event.target, "data-cover-cmd") ||
-        closestWithAttr(event.target, "data-light-set")
+        closestWithAttr(event.target, "data-light-set") ||
+        closestWithAttr(event.target, "data-rgb-set")
       ) {
         event.preventDefault();
       }
@@ -1001,6 +1227,63 @@
         nudgeSlider(lightModalSlider, lightModalValue, 5);
       } else {
         nudgeSlider(lightModalSlider, lightModalValue, -5);
+      }
+    });
+  }
+
+  if (rgbModalHue) {
+    rgbModalHue.addEventListener("input", updateRgbFromSliders);
+    rgbModalHue.addEventListener("change", updateRgbFromSliders);
+  }
+
+  if (rgbModalSaturation) {
+    rgbModalSaturation.addEventListener("input", updateRgbFromSliders);
+    rgbModalSaturation.addEventListener("change", updateRgbFromSliders);
+  }
+
+  if (rgbModalBrightness && rgbModalBrightnessValue) {
+    rgbModalBrightness.addEventListener("input", function () {
+      rgbModalBrightnessValue.textContent = String(rgbModalBrightness.value) + "%";
+    });
+    rgbModalBrightness.addEventListener("change", function () {
+      rgbModalBrightnessValue.textContent = String(rgbModalBrightness.value) + "%";
+    });
+  }
+
+  if (rgbModalPresets) {
+    rgbModalPresets.addEventListener("click", function (event) {
+      var preset = closestWithAttr(event.target, "data-rgb-preset");
+      var values;
+      if (!preset) {
+        return;
+      }
+      values = preset.getAttribute("data-rgb-preset").split(",");
+      setRgbSelection(values);
+    });
+  }
+
+  if (rgbModalCancel) {
+    rgbModalCancel.addEventListener("click", closeRgbModal);
+  }
+
+  if (rgbModalSave) {
+    rgbModalSave.addEventListener("click", function () {
+      var card = activeRgbCard;
+      var brightness;
+      if (!card || !rgbModalBrightness) {
+        closeRgbModal();
+        return;
+      }
+      brightness = Math.max(1, Math.min(100, parseInt(rgbModalBrightness.value, 10) || 100));
+      closeRgbModal();
+      setRgbColor(card, selectedRgb.slice(0), brightness);
+    });
+  }
+
+  if (rgbModal) {
+    rgbModal.addEventListener("click", function (event) {
+      if (event.target === rgbModal) {
+        closeRgbModal();
       }
     });
   }

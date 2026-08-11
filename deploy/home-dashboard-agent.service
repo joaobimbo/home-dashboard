@@ -1,0 +1,21 @@
+[Unit]
+Description=Home Dashboard Telegram Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=joao
+WorkingDirectory=/home/joao/code/home-dashboard
+EnvironmentFile=/etc/home-dashboard-agent.env
+ExecStart=/home/joao/code/home-dashboard/.venv/bin/python /home/joao/code/home-dashboard/telegram_agent.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/home-dashboard-agent
+
+[Install]
+WantedBy=multi-user.target

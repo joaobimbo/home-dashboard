@@ -1,0 +1,209 @@
+import unittest
+
+from modules.agent.validation import (
+    PlanValidationError,
+    validate_action,
+    validate_interpretation,
+)
+
+
+def parameters(**values):
+    return values
+
+
+CATALOG = [
+    {
+        "token": "S1",
+        "id": "office-light",
+        "kind": "shelly",
+        "component": "switch",
+        "display_name": "Luz Escritorio",
+        "capabilities": ["status", "power", "toggle"],
+    },
+    {
+        "token": "R1",
+        "id": "rgb-light",
+        "kind": "shelly",
+        "component": "rgbcct",
+        "display_name": "RGB",
+        "capabilities": ["status", "power", "toggle", "rgbcct"],
+    },
+    {
+        "token": "A1",
+        "id": "office-ac",
+        "kind": "daikin",
+        "component": "ac",
+        "display_name": "AC Escritorio",
+        "capabilities": ["status", "power", "ac_mode", "ac_setpoint", "ac_fan"],
+    },
+]
+
+
+class ValidationTests(unittest.TestCase):
+    def test_resolves_opaque_token_to_existing_device(self):
+        action = validate_action(
+            {"device": "A1", "operation": "power", "parameters": parameters(state="off")},
+            CATALOG,
+        )
+        self.assertEqual(action["device_id"], "office-ac")
+        self.assertEqual(action["parameters"], {"state": "off"})
+
+    def test_rejects_unknown_device_and_parameter(self):
+        with self.assertRaises(PlanValidationError):
+            validate_action(
+                {"device": "A99", "operation": "power", "parameters": parameters(state="off")},
+                CATALOG,
+            )
+        with self.assertRaises(PlanValidationError):
+            validate_action(
+                {"device": "A1", "operation": "power", "parameters": {"state": "off", "url": "http://evil"}},
+                CATALOG,
+            )
+
+    def test_rejects_toggle_in_persistent_rule(self):
+        with self.assertRaises(PlanValidationError):
+            validate_action(
+                {"device": "S1", "operation": "toggle", "parameters": {}},
+                CATALOG,
+                persistent=True,
+            )
+
+    def test_validates_rgb_ranges(self):
+        result = validate_action(
+            {
+                "device": "R1",
+                "operation": "rgbcct",
+                "parameters": {"mode": "rgb", "rgb": [255, 10, 0], "level": 60},
+            },
+            CATALOG,
+            persistent=True,
+        )
+        self.assertEqual(result["parameters"]["rgb"], [255, 10, 0])
+        with self.assertRaises(PlanValidationError):
+            validate_action(
+                {"device": "R1", "operation": "rgbcct", "parameters": {"rgb": [256, 0, 0]}},
+                CATALOG,
+            )
+
+    def test_validates_reusable_event_rule(self):
+        raw = {
+            "kind": "automation",
+            "reply": "",
+            "question": None,
+            "assumptions": [],
+            "actions": [],
+            "automation": {
+                "name": "AC after office light",
+                "description": "Turn the office AC off after the light turns off",
+                "trigger": {
+                    "source": "device",
+                    "device": "S1",
+                    "field": "state",
+                    "operator": "changes_to",
+                    "value": "off",
+                    "second_value": None,
+                    "at": None,
+                    "weekdays": [],
+                },
+                "conditions": [],
+                "cancel_conditions": [],
+                "steps": [
+                    {"kind": "wait", "seconds": 1800, "action": None},
+                    {
+                        "kind": "action",
+                        "seconds": None,
+                        "action": {
+                            "device": "A1",
+                            "operation": "power",
+                            "parameters": {"state": "off"},
+                        },
+                    },
+                ],
+                "repeat": "reusable",
+                "overlap": "ignore",
+            },
+        }
+        result = validate_interpretation(raw, CATALOG)
+        rule = result["automation"]
+        self.assertEqual(rule["trigger"]["device_id"], "office-light")
+        self.assertEqual(rule["steps"][1]["action"]["device_id"], "office-ac")
+
+    def test_validates_relative_one_time_schedule(self):
+        raw = {
+            "kind": "automation",
+            "automation": {
+                "name": "Office light pulse",
+                "description": "Turn on after 20 seconds, then off 10 seconds later",
+                "trigger": {
+                    "source": "schedule",
+                    "device": None,
+                    "field": "local_time",
+                    "operator": "after",
+                    "value": 20,
+                    "second_value": None,
+                    "at": None,
+                    "weekdays": [],
+                },
+                "conditions": [],
+                "cancel_conditions": [],
+                "steps": [
+                    {
+                        "kind": "action",
+                        "action": {
+                            "device": "S1",
+                            "operation": "power",
+                            "parameters": {"state": "on"},
+                        },
+                    },
+                    {"kind": "wait", "seconds": 10},
+                    {
+                        "kind": "action",
+                        "action": {
+                            "device": "S1",
+                            "operation": "power",
+                            "parameters": {"state": "off"},
+                        },
+                    },
+                ],
+                "repeat": "one_time",
+                "overlap": "single",
+            },
+        }
+        result = validate_interpretation(raw, CATALOG)
+        self.assertEqual(result["automation"]["trigger"]["operator"], "after")
+        self.assertEqual(result["automation"]["trigger"]["value"], 20)
+        self.assertEqual(result["automation"]["repeat"], "once")
+        self.assertEqual(result["automation"]["overlap"], "ignore")
+
+    def test_rejects_time_window_as_trigger(self):
+        raw = {
+            "kind": "automation",
+            "automation": {
+                "name": "Bad timer",
+                "trigger": {
+                    "source": "time",
+                    "field": "local_time",
+                    "operator": "between",
+                    "value": "00:00",
+                    "second_value": "00:01",
+                },
+                "steps": [
+                    {
+                        "kind": "action",
+                        "action": {
+                            "device": "S1",
+                            "operation": "power",
+                            "parameters": {"state": "on"},
+                        },
+                    }
+                ],
+                "repeat": "once",
+                "overlap": "ignore",
+            },
+        }
+        with self.assertRaisesRegex(PlanValidationError, "Time windows are conditions"):
+            validate_interpretation(raw, CATALOG)
+
+
+if __name__ == "__main__":
+    unittest.main()

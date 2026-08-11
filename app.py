@@ -158,6 +158,14 @@ def shelly_light_level(device_id):
     return jsonify(result), status_code
 
 
+@app.route("/api/shelly/<device_id>/rgbcct", methods=["POST"])
+def shelly_rgbcct(device_id):
+    payload = request.get_json(silent=True) or {}
+    result = controller.set_rgbcct(device_id, payload)
+    status_code = 200 if result.get("ok") else 400
+    return jsonify(result), status_code
+
+
 @app.route("/api/daikin/devices")
 def daikin_devices():
     return jsonify(daikin_controller.list_configured_devices())

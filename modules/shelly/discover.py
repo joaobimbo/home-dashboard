@@ -60,6 +60,8 @@ def http_json(url: str, timeout: float):
 def output_label(component: str, channel: int):
     if component == "cover":
         return f"Shutter {channel + 1}"
+    if component == "rgbcct":
+        return f"RGB light {channel + 1}"
     if component == "light":
         return f"Dimmer {channel + 1}"
     return f"Switch {channel + 1}"
@@ -163,7 +165,7 @@ def probe_host(host: str, timeout: float) -> Optional[Dict[str, object]]:
             if ":" not in key:
                 continue
             component, channel_text = key.split(":", 1)
-            if component not in {"switch", "cover", "light"}:
+            if component not in {"switch", "cover", "light", "rgbcct"}:
                 continue
             try:
                 channel = int(channel_text)

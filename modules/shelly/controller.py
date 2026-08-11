@@ -255,10 +255,27 @@ class ShellyController:
                 pos = relay_status.get("current_pos")
                 if isinstance(pos, (int, float)):
                     result["position"] = int(max(0, min(100, round(pos))))
-            if (device.component or "relay").lower() == "light":
+            component = (device.component or "relay").lower()
+            if component in {"light", "rgbcct"}:
                 brightness = relay_status.get("brightness")
                 if isinstance(brightness, (int, float)):
                     result["brightness"] = int(max(0, min(100, round(brightness))))
+            if component == "rgbcct":
+                mode = str(relay_status.get("mode", "")).lower()
+                if mode in {"rgb", "cct"}:
+                    result["mode"] = mode
+                rgb = relay_status.get("rgb")
+                if (
+                    isinstance(rgb, list)
+                    and len(rgb) == 3
+                    and all(isinstance(value, (int, float)) for value in rgb)
+                ):
+                    result["rgb"] = [
+                        int(max(0, min(255, round(value)))) for value in rgb
+                    ]
+                color_temp = relay_status.get("ct")
+                if isinstance(color_temp, (int, float)):
+                    result["color_temp"] = int(round(color_temp))
             return result
         except Exception as exc:
             return {
@@ -421,6 +438,76 @@ class ShellyController:
                 "error": str(exc),
             }
 
+    def set_rgbcct(self, device_id: str, updates: Dict[str, object]):
+        device = self._device_map.get(device_id)
+        if device is None:
+            return {"ok": False, "error": "Unknown device"}
+        if (device.component or "relay").lower() != "rgbcct":
+            return {"ok": False, "error": "Device is not an RGBCCT light"}
+
+        allowed = {"on", "brightness", "mode", "rgb", "color_temp"}
+        if not updates or any(key not in allowed for key in updates):
+            return {"ok": False, "error": "Invalid RGBCCT fields"}
+
+        params = [f"id={int(device.relay)}"]
+        try:
+            if "on" in updates:
+                if not isinstance(updates["on"], bool):
+                    raise ValueError("on must be true or false")
+                params.append("on=" + ("true" if updates["on"] else "false"))
+
+            if "brightness" in updates:
+                if type(updates["brightness"]) is not int:
+                    raise ValueError("brightness must be an integer")
+                brightness = int(updates["brightness"])
+                if brightness < 1 or brightness > 100:
+                    raise ValueError("brightness must be between 1 and 100")
+                params.append(f"brightness={brightness}")
+
+            if "mode" in updates:
+                mode = str(updates["mode"]).lower()
+                if mode not in {"rgb", "cct"}:
+                    raise ValueError("mode must be rgb or cct")
+                params.append(f"mode={mode}")
+
+            if "rgb" in updates:
+                rgb = updates["rgb"]
+                if not isinstance(rgb, list) or len(rgb) != 3:
+                    raise ValueError("rgb must contain three values")
+                if any(type(value) is not int for value in rgb):
+                    raise ValueError("rgb values must be integers")
+                values = [int(value) for value in rgb]
+                if any(value < 0 or value > 255 for value in values):
+                    raise ValueError("rgb values must be between 0 and 255")
+                params.append("rgb=" + json.dumps(values, separators=(",", ":")))
+
+            if "color_temp" in updates:
+                if type(updates["color_temp"]) is not int:
+                    raise ValueError("color_temp must be an integer")
+                color_temp = int(updates["color_temp"])
+                if color_temp < 2700 or color_temp > 6500:
+                    raise ValueError("color_temp must be between 2700 and 6500")
+                params.append(f"ct={color_temp}")
+        except (TypeError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+
+        if "on" not in updates and "brightness" not in updates:
+            return {"ok": False, "error": "RGBCCT requires on or brightness"}
+
+        try:
+            self._request_json(device, "/rpc/RGBCCT.Set?" + "&".join(params))
+            updated = self.read_device(device_id)
+            if updated.get("ok"):
+                return {"ok": True, **updated}
+            return updated
+        except Exception as exc:
+            return {
+                "ok": False,
+                "id": device.id,
+                "name": device.name,
+                "error": str(exc),
+            }
+
     def apply_action_to_devices(self, action: str, room: str | None = None):
         if action not in {"on", "off", "toggle"}:
             return {"ok": False, "error": "Invalid action"}
@@ -454,6 +541,9 @@ class ShellyController:
                 return self._request_json(device, f"/rpc/Light.GetStatus?id={channel}")
             except Exception:
                 return self._request_json(device, f"/light/{channel}")
+
+        if component == "rgbcct":
+            return self._request_json(device, f"/rpc/RGBCCT.GetStatus?id={channel}")
 
         if component == "cover":
             return self._request_json(device, f"/rpc/Cover.GetStatus?id={channel}")
@@ -497,6 +587,11 @@ class ShellyController:
                 self._request_json(device, f"/rpc/Light.Set?id={channel}&on={on_value}")
             except Exception:
                 self._request_json(device, f"/light/{channel}?turn={state_value}")
+            return
+
+        if component == "rgbcct":
+            on_value = "true" if state_value == "on" else "false"
+            self._request_json(device, f"/rpc/RGBCCT.Set?id={channel}&on={on_value}")
             return
 
         if component == "cover":

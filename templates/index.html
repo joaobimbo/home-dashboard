@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=Fraunces:opsz,wght@9..144,600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='23') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='24') }}">
 </head>
 <body>
   <div class="dashboard-shell">
@@ -42,7 +42,7 @@
       {% macro device_card(device) %}
         <button class="device-card is-off {% if device.image %}has-bg-image{% endif %}" data-device-id="{{ device.id }}" data-room="{{ device.room }}" data-component="{{ device.component or 'relay' }}" type="button" data-action="toggle" title="Toggle {{ device.name }}" {% if device.image %}style="--card-bg-image: url('{{ device.image }}');"{% endif %}>
           {% if not device.image %}
-          <div class="device-image fallback-icon" aria-hidden="true">{% if (device.component or 'relay') == 'cover' %}🪟{% elif (device.component or 'relay') == 'light' %}🔆{% else %}💡{% endif %}</div>
+          <div class="device-image fallback-icon" aria-hidden="true">{% if (device.component or 'relay') == 'cover' %}🪟{% elif (device.component or 'relay') == 'light' %}🔆{% elif (device.component or 'relay') == 'rgbcct' %}🎨{% else %}💡{% endif %}</div>
           {% endif %}
           <div class="device-meta">
             <h3>{{ device.name }}</h3>
@@ -61,6 +61,14 @@
             {% if (device.component or 'relay') == 'light' %}
             <div class="cover-controls" aria-label="Dimmer controls">
               <span class="cover-cmd" data-light-set="1" role="button" tabindex="0">%</span>
+            </div>
+            {% endif %}
+            {% if (device.component or 'relay') == 'rgbcct' %}
+            <div class="cover-controls" aria-label="Controlos de cor e intensidade">
+              <span class="cover-cmd rgb-set-cmd" data-rgb-set="1" role="button" tabindex="0" title="Escolher cor e intensidade">
+                <span class="rgb-card-swatch" data-rgb-card-swatch aria-hidden="true"></span>
+                <span>Cor</span>
+              </span>
             </div>
             {% endif %}
           </div>
@@ -178,6 +186,48 @@
     </div>
   </div>
 
+  <div class="cover-modal" id="rgb-modal" hidden>
+    <div class="cover-modal-card rgb-modal-card" role="dialog" aria-modal="true" aria-labelledby="rgb-modal-title">
+      <h3 id="rgb-modal-title">Cor e intensidade</h3>
+      <div class="rgb-preview-row">
+        <span class="rgb-preview" id="rgb-modal-preview" aria-hidden="true"></span>
+        <span class="rgb-value" id="rgb-modal-color-value">rgb(255, 255, 255)</span>
+      </div>
+
+      <label class="rgb-slider-label" for="rgb-modal-hue">Cor</label>
+      <input id="rgb-modal-hue" class="cover-modal-slider rgb-hue-slider" type="range" min="0" max="359" step="1" value="0">
+
+      <div class="rgb-modal-presets" id="rgb-modal-presets" aria-label="Cores predefinidas">
+        <span class="rgb-preset rgb-preset-white" data-rgb-preset="255,255,255" role="button" tabindex="0" title="Branco" aria-label="Branco"></span>
+        <span class="rgb-preset rgb-preset-red" data-rgb-preset="255,0,0" role="button" tabindex="0" title="Vermelho" aria-label="Vermelho"></span>
+        <span class="rgb-preset rgb-preset-orange" data-rgb-preset="255,128,0" role="button" tabindex="0" title="Laranja" aria-label="Laranja"></span>
+        <span class="rgb-preset rgb-preset-yellow" data-rgb-preset="255,255,0" role="button" tabindex="0" title="Amarelo" aria-label="Amarelo"></span>
+        <span class="rgb-preset rgb-preset-green" data-rgb-preset="0,255,0" role="button" tabindex="0" title="Verde" aria-label="Verde"></span>
+        <span class="rgb-preset rgb-preset-cyan" data-rgb-preset="0,255,255" role="button" tabindex="0" title="Ciano" aria-label="Ciano"></span>
+        <span class="rgb-preset rgb-preset-blue" data-rgb-preset="0,0,255" role="button" tabindex="0" title="Azul" aria-label="Azul"></span>
+        <span class="rgb-preset rgb-preset-purple" data-rgb-preset="160,32,240" role="button" tabindex="0" title="Roxo" aria-label="Roxo"></span>
+        <span class="rgb-preset rgb-preset-pink" data-rgb-preset="255,32,160" role="button" tabindex="0" title="Rosa" aria-label="Rosa"></span>
+      </div>
+
+      <div class="rgb-slider-heading">
+        <label class="rgb-slider-label" for="rgb-modal-saturation">Saturação</label>
+        <span id="rgb-modal-saturation-value">0%</span>
+      </div>
+      <input id="rgb-modal-saturation" class="cover-modal-slider rgb-saturation-slider" type="range" min="0" max="100" step="1" value="0">
+
+      <div class="rgb-slider-heading">
+        <label class="rgb-slider-label" for="rgb-modal-brightness">Intensidade</label>
+        <span id="rgb-modal-brightness-value">100%</span>
+      </div>
+      <input id="rgb-modal-brightness" class="cover-modal-slider" type="range" min="1" max="100" step="1" value="100">
+
+      <div class="cover-modal-actions">
+        <button type="button" class="cover-modal-btn" id="rgb-modal-cancel">Cancelar</button>
+        <button type="button" class="cover-modal-btn is-primary" id="rgb-modal-save">Aplicar</button>
+      </div>
+    </div>
+  </div>
+
   <div class="cover-modal" id="ac-setpoint-modal" hidden>
     <div class="cover-modal-card" role="dialog" aria-modal="true" aria-labelledby="ac-setpoint-modal-title">
       <h3 id="ac-setpoint-modal-title">Temperatura</h3>
@@ -231,6 +281,6 @@
   <script>
     window.__CONFIGURED_DEVICES__ = {{ devices|tojson }};
   </script>
-  <script src="{{ url_for('static', filename='app.js', v='27') }}"></script>
+  <script src="{{ url_for('static', filename='app.js', v='28') }}"></script>
 </body>
 </html>

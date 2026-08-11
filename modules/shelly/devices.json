@@ -53,18 +53,29 @@
     "image": ""
   },
   {
-    "id": "s3bl-c010007aeu-223-192-168-1-223-switch-0",
-    "device_name": "S3BL-C010007AEU 223",
-    "display_name": "Luz RGB Sala",
+    "id": "none-192-168-1-213-relay-0",
+    "device_name": "None",
+    "display_name": "None",
     "other_names": [],
     "room": "Casa",
-    "host": "192.168.1.223",
-    "component": "light",
+    "host": "192.168.1.213",
+    "component": "relay",
     "relay": 0,
     "image": ""
   },
   {
-    "id": "s3dm-0a101wwl-224-192-168-1-224-light-0",
+    "id": "s3bl-c010007aeu-223-192-168-1-223-rgbcct-0",
+    "device_name": "S3BL-C010007AEU 223",
+    "display_name": "S3BL-C010007AEU 223",
+    "other_names": [],
+    "room": "Casa",
+    "host": "192.168.1.223",
+    "component": "rgbcct",
+    "relay": 0,
+    "image": ""
+  },
+  {
+    "id": "luz-escritorio",
     "device_name": "S3DM-0A101WWL 224",
     "display_name": "Luz Escritorio",
     "other_names": [],

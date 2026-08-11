@@ -1,0 +1,774 @@
+"""Telegram long-polling interface for safe home automation."""
+
+import asyncio
+import hashlib
+import logging
+import threading
+import time
+import uuid
+from collections import defaultdict, deque
+from typing import Dict, Optional, Tuple
+
+from .client import DashboardClient, DashboardError
+from .engine import AutomationEngine
+from .providers import LanguageProvider, ProviderError
+from .store import AutomationStore
+from .validation import PlanValidationError, validate_interpretation
+
+
+logger = logging.getLogger(__name__)
+
+RULE_MENU_PAGE_SIZE = 8
+
+
+class TelegramAgent:
+    def __init__(
+        self,
+        token: str,
+        allowed_chat_ids,
+        provider: LanguageProvider,
+        provider_name: str,
+        provider_model: str,
+        client: DashboardClient,
+        store: AutomationStore,
+        timezone_name: str,
+    ):
+        try:
+            from telegram.ext import Application
+        except ImportError as exc:
+            raise RuntimeError("python-telegram-bot is not installed") from exc
+        self.allowed_chat_ids = frozenset(int(value) for value in allowed_chat_ids)
+        self.provider = provider
+        self.provider_name = provider_name
+        self.provider_model = provider_model
+        self.client = client
+        self.store = store
+        self.application = (
+            Application.builder()
+            .token(token)
+            .post_init(self._post_init)
+            .post_shutdown(self._post_shutdown)
+            .build()
+        )
+        self.engine = AutomationEngine(
+            store,
+            client,
+            notifier=self._notify_from_thread,
+            timezone_name=timezone_name,
+        )
+        self._loop = None
+        self._engine_thread: Optional[threading.Thread] = None
+        self._pending: Dict[str, Dict[str, object]] = {}
+        self._clarifications: Dict[Tuple[int, int], Dict[str, object]] = {}
+        self._rate_limits = defaultdict(deque)
+        self._register_handlers()
+
+    def _register_handlers(self):
+        from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler, filters
+
+        self.application.add_handler(CommandHandler("start", self.help_command))
+        self.application.add_handler(CommandHandler("help", self.help_command))
+        self.application.add_handler(CommandHandler("devices", self.devices_command))
+        self.application.add_handler(CommandHandler("status", self.status_command))
+        self.application.add_handler(CommandHandler("debug", self.debug_command))
+        self.application.add_handler(CommandHandler("rules", self.rules_command))
+        self.application.add_handler(CommandHandler("enable", self.enable_command))
+        self.application.add_handler(CommandHandler("disable", self.disable_command))
+        self.application.add_handler(CommandHandler("delete", self.delete_command))
+        self.application.add_handler(CallbackQueryHandler(self.callback, pattern=r"^agent:"))
+        self.application.add_handler(
+            MessageHandler(filters.TEXT & ~filters.COMMAND, self.natural_language)
+        )
+
+    async def _post_init(self, _application):
+        self._loop = asyncio.get_running_loop()
+        self._engine_thread = threading.Thread(
+            target=self.engine.run_forever,
+            name="automation-engine",
+            daemon=True,
+        )
+        self._engine_thread.start()
+        logger.info("agent_ready automation_engine=running")
+
+    async def _post_shutdown(self, _application):
+        logger.info("agent_stopping")
+        self.engine.stop()
+        if self._engine_thread:
+            await asyncio.to_thread(self._engine_thread.join, 5)
+
+    def run(self):
+        self.application.run_polling(
+            allowed_updates=["message", "callback_query"],
+            drop_pending_updates=False,
+        )
+
+    def _allowed(self, update) -> bool:
+        chat = update.effective_chat
+        return bool(chat and int(chat.id) in self.allowed_chat_ids and chat.type in {"group", "supergroup"})
+
+    async def help_command(self, update, _context):
+        if not self._allowed(update):
+            return
+        await update.effective_message.reply_text(
+            "Send a home-control request in natural language.\n\n"
+            "/devices — configured devices\n"
+            "/status — current device status\n"
+            "/debug — agent and dashboard diagnostics\n"
+            "/rules — saved automations\n"
+            "/enable — choose a disabled rule\n"
+            "/disable — choose an enabled rule\n"
+            "/delete — choose a rule, then confirm"
+        )
+
+    async def devices_command(self, update, _context):
+        if not self._allowed(update):
+            return
+        try:
+            catalog = await asyncio.to_thread(self.client.catalog)
+            lines = [
+                f"• {item['display_name']} ({item['room']}): {', '.join(item['capabilities'])}"
+                for item in catalog
+            ]
+            await update.effective_message.reply_text("Configured devices:\n" + "\n".join(lines))
+        except DashboardError as exc:
+            await update.effective_message.reply_text(f"Dashboard error: {exc}")
+
+    async def status_command(self, update, _context):
+        if not self._allowed(update):
+            return
+        try:
+            catalog, snapshot = await asyncio.gather(
+                asyncio.to_thread(self.client.catalog),
+                asyncio.to_thread(self.client.snapshot),
+            )
+            lines = []
+            for device in catalog:
+                status = snapshot["devices"].get(device["id"], {})
+                lines.append(self._format_status(device["display_name"], status))
+            await update.effective_message.reply_text("\n".join(lines))
+        except DashboardError as exc:
+            await update.effective_message.reply_text(f"Dashboard error: {exc}")
+
+    async def debug_command(self, update, _context):
+        chat = update.effective_chat
+        user = update.effective_user
+        if not self._allowed(update):
+            logger.warning(
+                "debug_rejected chat_id=%s chat_type=%s user_id=%s",
+                getattr(chat, "id", None),
+                getattr(chat, "type", None),
+                getattr(user, "id", None),
+            )
+            return
+
+        logger.info(
+            "debug_requested chat_id=%s user_id=%s",
+            int(chat.id),
+            getattr(user, "id", None),
+        )
+        rules = self.store.list_rules()
+        engine_running = bool(self._engine_thread and self._engine_thread.is_alive())
+        lines = [
+            "Telegram agent diagnostics",
+            f"✓ Message received from authorized {chat.type} {chat.id}",
+            f"{'✓' if engine_running else '✗'} Automation engine: {'running' if engine_running else 'stopped'}",
+            f"✓ LLM configuration: {self.provider_name} / {self.provider_model}",
+            f"✓ Rules loaded: {len(rules)} ({sum(1 for rule in rules if rule.get('enabled'))} enabled)",
+        ]
+        try:
+            catalog = await asyncio.to_thread(self.client.catalog)
+            shelly_count = sum(1 for item in catalog if item.get("kind") == "shelly")
+            daikin_count = sum(1 for item in catalog if item.get("kind") == "daikin")
+            rooms = sorted({str(item.get("room") or "Casa") for item in catalog})
+            lines.extend(
+                [
+                    f"✓ Dashboard catalog: reachable ({shelly_count} Shelly, {daikin_count} AC)",
+                    "Rooms visible to the LLM: " + ", ".join(rooms),
+                    "Use /devices to inspect exact names and capabilities.",
+                ]
+            )
+            logger.info(
+                "debug_dashboard_ok chat_id=%s devices=%d shelly=%d daikin=%d",
+                int(chat.id),
+                len(catalog),
+                shelly_count,
+                daikin_count,
+            )
+        except Exception as exc:
+            lines.append(f"✗ Dashboard catalog: {exc}")
+            logger.warning("debug_dashboard_failed chat_id=%s error=%s", int(chat.id), exc)
+        lines.append("The LLM API is tested when a natural-language request is sent.")
+        await update.effective_message.reply_text("\n".join(lines))
+
+    async def rules_command(self, update, _context):
+        if not self._allowed(update):
+            return
+        rules = self.store.list_rules()
+        if not rules:
+            await update.effective_message.reply_text("No saved automations.")
+            return
+        lines = [
+            f"• {rule['id']} [{'on' if rule.get('enabled') else 'off'}] {rule['name']}"
+            for rule in rules
+        ]
+        await update.effective_message.reply_text("Saved automations:\n" + "\n".join(lines))
+
+    async def enable_command(self, update, context):
+        await self._set_enabled_command(update, context, True)
+
+    async def disable_command(self, update, context):
+        await self._set_enabled_command(update, context, False)
+
+    async def _set_enabled_command(self, update, context, enabled: bool):
+        if not self._allowed(update):
+            return
+        if not context.args:
+            await self._send_rule_menu(update, "enable" if enabled else "disable")
+            return
+        if len(context.args) != 1:
+            await update.effective_message.reply_text(
+                f"Use /{'enable' if enabled else 'disable'} to choose a rule, "
+                "or optionally provide one rule ID."
+            )
+            return
+        try:
+            rule = await asyncio.to_thread(
+                self.store.set_enabled,
+                context.args[0],
+                enabled,
+                int(update.effective_user.id),
+            )
+            await update.effective_message.reply_text(
+                self._format_enabled_result(rule, enabled)
+            )
+        except KeyError:
+            await update.effective_message.reply_text("Unknown rule ID.")
+
+    async def delete_command(self, update, context):
+        if not self._allowed(update):
+            return
+        if not context.args:
+            await self._send_rule_menu(update, "delete")
+            return
+        if len(context.args) != 1:
+            await update.effective_message.reply_text(
+                "Use /delete to choose a rule, or optionally provide one rule ID."
+            )
+            return
+        rule = self.store.get_rule(context.args[0])
+        if not rule:
+            await update.effective_message.reply_text("Unknown rule ID.")
+            return
+        token = self._new_pending(
+            "delete",
+            update,
+            {"rule_id": rule["id"], "rule_name": rule["name"]},
+        )
+        await self._send_confirmation(
+            update,
+            f"Delete automation '{rule['name']}' ({rule['id']})?",
+            token,
+        )
+
+    async def natural_language(self, update, _context):
+        if not self._allowed(update):
+            logger.warning(
+                "message_rejected chat_id=%s chat_type=%s user_id=%s",
+                getattr(update.effective_chat, "id", None),
+                getattr(update.effective_chat, "type", None),
+                getattr(update.effective_user, "id", None),
+            )
+            return
+        if not update.effective_message.text:
+            return
+        if not self._consume_rate_limit(update):
+            logger.warning(
+                "request_rate_limited chat_id=%s user_id=%s",
+                int(update.effective_chat.id),
+                int(update.effective_user.id),
+            )
+            await update.effective_message.reply_text("Too many requests; please wait a minute.")
+            return
+        request_id = uuid.uuid4().hex[:10]
+        incoming_message = update.effective_message.text.strip()
+        message = incoming_message
+        key = (int(update.effective_chat.id), int(update.effective_user.id))
+        previous = self._clarifications.pop(key, None)
+        if previous and float(previous["expires_at"]) > time.monotonic():
+            message = (
+                f"Original request: {previous['request']}\n"
+                f"Clarifying question: {previous['question']}\n"
+                f"User answer: {message}"
+            )
+        logger.info(
+            "request_received request_id=%s chat_id=%s user_id=%s text=%r clarification=%s",
+            request_id,
+            int(update.effective_chat.id),
+            int(update.effective_user.id),
+            incoming_message,
+            bool(previous),
+        )
+        progress = await update.effective_message.reply_text(
+            "1/3 Request received. Loading devices and interpreting…"
+        )
+        stage = "catalog"
+        raw = None
+        try:
+            catalog = await asyncio.to_thread(self.client.catalog)
+            logger.info(
+                "catalog_loaded request_id=%s devices=%d",
+                request_id,
+                len(catalog),
+            )
+            safety_id = hashlib.sha256(
+                f"telegram:{update.effective_user.id}".encode("utf-8")
+            ).hexdigest()[:32]
+            stage = "provider"
+            logger.info(
+                "provider_started request_id=%s provider=%s model=%s",
+                request_id,
+                self.provider_name,
+                self.provider_model,
+            )
+            raw = await asyncio.to_thread(
+                self.provider.interpret,
+                message,
+                catalog,
+                safety_id,
+            )
+            logger.info(
+                "provider_completed request_id=%s proposed_kind=%s",
+                request_id,
+                str(raw.get("kind")) if isinstance(raw, dict) else "invalid",
+            )
+            stage = "validation"
+            plan = validate_interpretation(raw, catalog)
+            logger.info(
+                "plan_validated request_id=%s kind=%s plan=%r",
+                request_id,
+                plan["kind"],
+                plan,
+            )
+            self.store.audit(
+                "request_interpreted",
+                user_id=int(update.effective_user.id),
+                chat_id=int(update.effective_chat.id),
+                kind=plan["kind"],
+                provider=self.provider_name,
+                model=self.provider_model,
+            )
+            await self._update_progress(progress, self._progress_text(plan))
+            stage = "handling"
+            await self._handle_plan(update, plan, message)
+        except (DashboardError, ProviderError, PlanValidationError) as exc:
+            if stage == "validation":
+                logger.warning(
+                    "provider_plan_rejected request_id=%s plan=%s",
+                    request_id,
+                    repr(raw)[:4000],
+                )
+            logger.warning(
+                "request_failed request_id=%s stage=%s error=%s",
+                request_id,
+                stage,
+                exc,
+            )
+            self.store.audit(
+                "request_rejected",
+                user_id=int(update.effective_user.id),
+                error=str(exc)[:500],
+            )
+            await self._update_progress(progress, f"Failed during {stage}: {exc}")
+            await update.effective_message.reply_text(f"I couldn't safely carry that out: {exc}")
+        except Exception as exc:
+            logger.exception(
+                "request_unexpected_failure request_id=%s stage=%s error=%s",
+                request_id,
+                stage,
+                exc,
+            )
+            self.store.audit(
+                "request_failed_unexpectedly",
+                user_id=int(update.effective_user.id),
+                error=type(exc).__name__,
+            )
+            await self._update_progress(
+                progress,
+                f"Failed during {stage}: unexpected {type(exc).__name__}",
+            )
+            await update.effective_message.reply_text(
+                "I couldn't carry that out because of an unexpected agent error. Check the agent log."
+            )
+
+    @staticmethod
+    def _progress_text(plan: Dict[str, object]) -> str:
+        kind = plan["kind"]
+        if kind == "direct_actions":
+            return f"2/3 Plan validated. Sending {len(plan['actions'])} action(s) to the dashboard…"
+        if kind == "status_query":
+            return f"2/3 Plan validated. Reading {len(plan['actions'])} device status value(s)…"
+        if kind == "automation":
+            return "2/3 Automation validated. Review the confirmation below."
+        if kind == "clarification":
+            return "2/3 More information is needed."
+        return "2/3 Request interpreted, but it is not a supported home-control action."
+
+    @staticmethod
+    async def _update_progress(progress, text: str):
+        try:
+            await progress.edit_text(text)
+        except Exception as exc:
+            logger.warning("progress_update_failed error=%s", exc)
+
+    async def _handle_plan(self, update, plan: Dict[str, object], original: str):
+        kind = plan["kind"]
+        if kind == "clarification":
+            self._clarifications[(int(update.effective_chat.id), int(update.effective_user.id))] = {
+                "request": original,
+                "question": plan["question"],
+                "expires_at": time.monotonic() + 10 * 60,
+            }
+            await update.effective_message.reply_text(str(plan["question"]))
+            return
+        if kind == "unsupported":
+            await update.effective_message.reply_text(plan.get("reply") or "That request is outside home control.")
+            return
+        if kind in {"direct_actions", "status_query"}:
+            results = []
+            status_snapshot = None
+            if kind == "status_query":
+                status_snapshot = await asyncio.to_thread(self.client.snapshot, False)
+            for action in plan["actions"]:
+                try:
+                    logger.info(
+                        "action_started operation=%s device_id=%s parameters=%r status_query=%s",
+                        action["operation"],
+                        action["device_id"],
+                        action.get("parameters"),
+                        kind == "status_query",
+                    )
+                    if status_snapshot is not None:
+                        result = status_snapshot["devices"].get(action["device_id"])
+                        if not isinstance(result, dict):
+                            raise DashboardError("Device status is unavailable")
+                    else:
+                        result = await asyncio.to_thread(self.client.execute, action)
+                    results.append(self._format_status(action["display_name"], result))
+                    self.store.audit(
+                        "direct_action_succeeded",
+                        user_id=int(update.effective_user.id),
+                        operation=action["operation"],
+                        device_id=action["device_id"],
+                    )
+                    logger.info(
+                        "action_succeeded operation=%s device_id=%s result=%r",
+                        action["operation"],
+                        action["device_id"],
+                        result,
+                    )
+                except DashboardError as exc:
+                    logger.warning(
+                        "action_failed operation=%s device_id=%s error=%s",
+                        action["operation"],
+                        action["device_id"],
+                        exc,
+                    )
+                    results.append(f"{action['display_name']}: failed — {exc}")
+            await update.effective_message.reply_text(
+                "3/3 Dashboard response\n" + "\n".join(results)
+            )
+            return
+        if kind == "automation":
+            automation = plan["automation"]
+            assumptions = plan.get("assumptions") or []
+            existing = next(
+                (rule for rule in self.store.list_rules() if rule["name"].casefold() == automation["name"].casefold()),
+                None,
+            )
+            payload = {"automation": automation}
+            if existing:
+                payload["replace_rule_id"] = existing["id"]
+            token = self._new_pending("save", update, payload)
+            preview = self._format_automation(automation)
+            if assumptions:
+                preview += "\nAssumptions: " + "; ".join(assumptions)
+            if existing:
+                preview += f"\nThis replaces existing rule {existing['id']}."
+            await self._send_confirmation(update, preview, token)
+
+    async def callback(self, update, _context):
+        query = update.callback_query
+        if not query or not self._allowed(update):
+            return
+        parts = str(query.data or "").split(":")
+        if len(parts) == 4 and parts[:2] == ["agent", "page"]:
+            await self._rule_page_callback(query, parts[2], parts[3])
+            return
+        if len(parts) == 4 and parts[:2] == ["agent", "select"]:
+            await self._rule_select_callback(update, query, parts[2], parts[3])
+            return
+        if len(parts) == 3 and parts[:2] == ["agent", "noop"]:
+            await query.answer()
+            return
+        if len(parts) != 3:
+            return
+        decision, token = parts[1], parts[2]
+        if decision not in {"confirm", "cancel"}:
+            await query.answer("Invalid confirmation.", show_alert=True)
+            return
+        pending = self._pending.pop(token, None)
+        if not pending or float(pending["expires_at"]) < time.monotonic():
+            await query.answer()
+            await query.edit_message_text("This confirmation expired.")
+            return
+        if (
+            int(pending["user_id"]) != int(update.effective_user.id)
+            or int(pending["chat_id"]) != int(update.effective_chat.id)
+        ):
+            self._pending[token] = pending
+            await query.answer("Only the person who requested this can confirm it.", show_alert=True)
+            return
+        await query.answer()
+        if decision == "cancel":
+            await query.edit_message_text("Cancelled.")
+            return
+        payload = pending["payload"]
+        if pending["kind"] == "save":
+            replace_id = payload.get("replace_rule_id")
+            if replace_id:
+                try:
+                    await asyncio.to_thread(self.store.delete_rule, replace_id, int(update.effective_user.id))
+                except KeyError:
+                    pass
+            try:
+                rule = await asyncio.to_thread(
+                    self.store.create_rule,
+                    payload["automation"],
+                    int(update.effective_user.id),
+                    int(update.effective_chat.id),
+                )
+                await query.edit_message_text(f"Saved automation '{rule['name']}' as {rule['id']}.")
+            except ValueError as exc:
+                await query.edit_message_text(f"Could not save automation: {exc}")
+        elif pending["kind"] == "delete":
+            try:
+                rule = await asyncio.to_thread(
+                    self.store.delete_rule,
+                    payload["rule_id"],
+                    int(update.effective_user.id),
+                )
+                await query.edit_message_text(f"Deleted automation '{rule['name']}'.")
+            except KeyError:
+                await query.edit_message_text("That automation no longer exists.")
+
+    async def _send_rule_menu(self, update, action: str, page: int = 0):
+        text, keyboard = self._build_rule_menu(action, page)
+        await update.effective_message.reply_text(text, reply_markup=keyboard)
+
+    def _build_rule_menu(self, action: str, page: int = 0):
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+        if action == "enable":
+            rules = [rule for rule in self.store.list_rules() if not rule.get("enabled")]
+            title = "Choose an automation to enable:"
+            empty = "There are no disabled automations."
+            icon = "▶️"
+        elif action == "disable":
+            rules = [rule for rule in self.store.list_rules() if rule.get("enabled")]
+            title = "Choose an automation to disable:"
+            empty = "There are no enabled automations."
+            icon = "⏸"
+        elif action == "delete":
+            rules = self.store.list_rules()
+            title = "Choose an automation to delete:"
+            empty = "There are no saved automations."
+            icon = "🗑"
+        else:
+            raise ValueError("Invalid rule menu action")
+
+        if not rules:
+            return empty, None
+
+        page_count = (len(rules) + RULE_MENU_PAGE_SIZE - 1) // RULE_MENU_PAGE_SIZE
+        page = max(0, min(int(page), page_count - 1))
+        start = page * RULE_MENU_PAGE_SIZE
+        rows = [
+            [
+                InlineKeyboardButton(
+                    f"{icon} {rule['name']}",
+                    callback_data=f"agent:select:{action}:{rule['id']}",
+                )
+            ]
+            for rule in rules[start : start + RULE_MENU_PAGE_SIZE]
+        ]
+        if page_count > 1:
+            navigation = []
+            if page > 0:
+                navigation.append(
+                    InlineKeyboardButton(
+                        "‹ Previous",
+                        callback_data=f"agent:page:{action}:{page - 1}",
+                    )
+                )
+            navigation.append(InlineKeyboardButton(f"{page + 1}/{page_count}", callback_data="agent:noop:0"))
+            if page + 1 < page_count:
+                navigation.append(
+                    InlineKeyboardButton(
+                        "Next ›",
+                        callback_data=f"agent:page:{action}:{page + 1}",
+                    )
+                )
+            rows.append(navigation)
+        return title, InlineKeyboardMarkup(rows)
+
+    async def _rule_page_callback(self, query, action: str, page_text: str):
+        if action not in {"enable", "disable", "delete"}:
+            await query.answer("Invalid menu.", show_alert=True)
+            return
+        try:
+            page = int(page_text)
+        except ValueError:
+            await query.answer("Invalid menu.", show_alert=True)
+            return
+        await query.answer()
+        text, keyboard = self._build_rule_menu(action, page)
+        await query.edit_message_text(text, reply_markup=keyboard)
+
+    async def _rule_select_callback(self, update, query, action: str, rule_id: str):
+        if action not in {"enable", "disable", "delete"}:
+            await query.answer("Invalid selection.", show_alert=True)
+            return
+        rule = self.store.get_rule(rule_id)
+        if not rule:
+            await query.answer()
+            await query.edit_message_text("That automation no longer exists.")
+            return
+        await query.answer()
+        if action in {"enable", "disable"}:
+            enabled = action == "enable"
+            if bool(rule.get("enabled")) == enabled:
+                await query.edit_message_text(
+                    f"Automation '{rule['name']}' is already {'enabled' if enabled else 'disabled'}."
+                )
+                return
+            try:
+                changed = await asyncio.to_thread(
+                    self.store.set_enabled,
+                    rule_id,
+                    enabled,
+                    int(update.effective_user.id),
+                )
+                await query.edit_message_text(
+                    self._format_enabled_result(changed, enabled)
+                )
+            except KeyError:
+                await query.edit_message_text("That automation no longer exists.")
+            return
+
+        token = self._new_pending(
+            "delete",
+            update,
+            {"rule_id": rule["id"], "rule_name": rule["name"]},
+        )
+        await query.edit_message_text(
+            f"Delete automation '{rule['name']}' ({rule['id']})?",
+            reply_markup=self._confirmation_markup(token),
+        )
+
+    @staticmethod
+    def _format_enabled_result(rule: Dict[str, object], enabled: bool) -> str:
+        trigger = rule.get("trigger")
+        if (
+            enabled
+            and isinstance(trigger, dict)
+            and trigger.get("source") == "schedule"
+            and trigger.get("operator") == "after"
+        ):
+            return f"Automation '{rule['name']}' enabled; its countdown restarted."
+        return f"Automation '{rule['name']}' {'enabled' if enabled else 'disabled'}."
+
+    def _new_pending(self, kind: str, update, payload: Dict[str, object]) -> str:
+        self._expire_pending()
+        token = uuid.uuid4().hex[:16]
+        self._pending[token] = {
+            "kind": kind,
+            "payload": payload,
+            "user_id": int(update.effective_user.id),
+            "chat_id": int(update.effective_chat.id),
+            "expires_at": time.monotonic() + 10 * 60,
+        }
+        return token
+
+    async def _send_confirmation(self, update, text: str, token: str):
+        await update.effective_message.reply_text(
+            text,
+            reply_markup=self._confirmation_markup(token),
+        )
+
+    @staticmethod
+    def _confirmation_markup(token: str):
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+        return InlineKeyboardMarkup(
+            [[
+                InlineKeyboardButton("Confirm", callback_data=f"agent:confirm:{token}"),
+                InlineKeyboardButton("Cancel", callback_data=f"agent:cancel:{token}"),
+            ]]
+        )
+
+    def _expire_pending(self):
+        now = time.monotonic()
+        self._pending = {
+            key: value for key, value in self._pending.items() if float(value["expires_at"]) >= now
+        }
+
+    def _consume_rate_limit(self, update) -> bool:
+        key = (int(update.effective_chat.id), int(update.effective_user.id))
+        values = self._rate_limits[key]
+        now = time.monotonic()
+        while values and values[0] < now - 60:
+            values.popleft()
+        if len(values) >= 10:
+            return False
+        values.append(now)
+        return True
+
+    def _notify_from_thread(self, chat_id: int, message: str):
+        if self._loop is None:
+            raise RuntimeError("Telegram loop is not running")
+        future = asyncio.run_coroutine_threadsafe(
+            self.application.bot.send_message(chat_id=chat_id, text=message),
+            self._loop,
+        )
+        future.result(timeout=20)
+
+    @staticmethod
+    def _format_status(name: str, status: Dict[str, object]) -> str:
+        if not status or not status.get("ok"):
+            return f"{name}: unavailable"
+        fields = []
+        for key in ("state", "power", "mode", "brightness", "position", "setpoint", "current_temp", "fan_speed", "color_temp"):
+            if key in status:
+                fields.append(f"{key}={status[key]}")
+        return f"{name}: " + (", ".join(fields) if fields else "ok")
+
+    @staticmethod
+    def _format_automation(rule: Dict[str, object]) -> str:
+        trigger = rule["trigger"]
+        source = trigger.get("display_name") or trigger.get("source")
+        lines = [
+            f"Save automation: {rule['name']}",
+            rule.get("description") or "",
+            f"Trigger: {source} {trigger['field']} {trigger['operator']} {trigger.get('value')}",
+            f"Repeat: {rule['repeat']}; overlap: {rule['overlap']}",
+            "Steps:",
+        ]
+        for step in rule["steps"]:
+            if step["kind"] == "wait":
+                lines.append(f"• wait {step['seconds']} seconds")
+            else:
+                action = step["action"]
+                lines.append(
+                    f"• {action['display_name']}: {action['operation']} {action['parameters']}"
+                )
+        return "\n".join(line for line in lines if line)
