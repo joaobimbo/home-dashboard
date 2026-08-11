@@ -1,5 +1,6 @@
 """Local authorization and semantic validation for model-produced plans."""
 
+import re
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -110,6 +111,12 @@ def _validate_rgbcct(params: Dict[str, object]):
         _require(params["mode"] in {"rgb", "cct"}, "Invalid RGBCCT mode")
     if "rgb" in params:
         rgb = params["rgb"]
+        if isinstance(rgb, str):
+            match = re.fullmatch(r"#?([0-9a-fA-F]{6})", rgb)
+            _require(match is not None, "Invalid RGB value")
+            value = match.group(1)
+            rgb = [int(value[index : index + 2], 16) for index in (0, 2, 4)]
+            params["rgb"] = rgb
         _require(isinstance(rgb, list) and len(rgb) == 3, "Invalid RGB value")
         _require(all(type(value) is int and 0 <= value <= 255 for value in rgb), "Invalid RGB value")
     if "color_temp" in params:

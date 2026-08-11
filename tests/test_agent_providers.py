@@ -66,6 +66,7 @@ class ProviderTests(unittest.TestCase):
         self.assertIn("Luz Escritorio", kwargs["input"])
         self.assertIn("power(device,state=on|off)", kwargs["input"])
         self.assertIn("operator=after", kwargs["input"])
+        self.assertIn("green is\n[0,255,0]", kwargs["input"])
 
 
 if __name__ == "__main__":

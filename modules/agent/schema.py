@@ -259,9 +259,13 @@ def build_gemini_prompt(message: str, catalog: List[Dict[str, object]]) -> str:
 Available calls:
 status(device); power(device,state=on|off); toggle(device, immediate only);
 brightness(device,level=1..100); cover(device,command=open|close|stop);
-position(device,position=0..100); rgbcct(device,state?,level?,mode?,rgb?,color_temp?);
+position(device,position=0..100);
+rgbcct(device,state?,level?,mode?,rgb=[red,green,blue]?,color_temp?);
 ac_mode(device,mode=auto|cool|heat|dry|fan);
 ac_setpoint(device,temperature=10..32); ac_fan(device,speed=auto|low|mid|high).
+
+RGB components must be integer JSON arrays from 0 to 255, for example green is
+[0,255,0], never a hex string. Include state="on" when asked to set a colour.
 
 Return only a JSON object, without Markdown. For an immediate request use
 {{"kind":"direct_actions","actions":[{{"device":"S1","operation":"power","parameters":{{"state":"off"}}}}]}}.

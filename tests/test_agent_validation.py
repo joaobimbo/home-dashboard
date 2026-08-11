@@ -79,9 +79,36 @@ class ValidationTests(unittest.TestCase):
             persistent=True,
         )
         self.assertEqual(result["parameters"]["rgb"], [255, 10, 0])
+        hex_result = validate_action(
+            {
+                "device": "R1",
+                "operation": "rgbcct",
+                "parameters": {"state": "on", "rgb": "00FF00"},
+            },
+            CATALOG,
+        )
+        self.assertEqual(hex_result["parameters"]["rgb"], [0, 255, 0])
+        hash_hex_result = validate_action(
+            {
+                "device": "R1",
+                "operation": "rgbcct",
+                "parameters": {"state": "on", "rgb": "#ff000a"},
+            },
+            CATALOG,
+        )
+        self.assertEqual(hash_hex_result["parameters"]["rgb"], [255, 0, 10])
         with self.assertRaises(PlanValidationError):
             validate_action(
                 {"device": "R1", "operation": "rgbcct", "parameters": {"rgb": [256, 0, 0]}},
+                CATALOG,
+            )
+        with self.assertRaises(PlanValidationError):
+            validate_action(
+                {
+                    "device": "R1",
+                    "operation": "rgbcct",
+                    "parameters": {"state": "on", "rgb": "green"},
+                },
                 CATALOG,
             )
 

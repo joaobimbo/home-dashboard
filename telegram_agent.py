@@ -43,6 +43,7 @@ def main():
         client=client,
         store=store,
         timezone_name=settings.timezone_name,
+        max_message_age_seconds=settings.max_message_age_seconds,
     ).run()
 
 

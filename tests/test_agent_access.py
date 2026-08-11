@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest import mock
 
@@ -9,6 +10,7 @@ class TelegramAccessTests(unittest.TestCase):
     def setUp(self):
         self.agent = TelegramAgent.__new__(TelegramAgent)
         self.agent.allowed_chat_ids = frozenset({-1001})
+        self.agent.max_message_age_seconds = 3600
 
     def test_allows_only_configured_groups(self):
         group = SimpleNamespace(effective_chat=SimpleNamespace(id=-1001, type="supergroup"))
@@ -17,6 +19,30 @@ class TelegramAccessTests(unittest.TestCase):
         self.assertTrue(self.agent._allowed(group))
         self.assertFalse(self.agent._allowed(other))
         self.assertFalse(self.agent._allowed(direct))
+
+    def test_drops_messages_older_than_one_hour(self):
+        def update_at(sent_at):
+            return SimpleNamespace(
+                callback_query=None,
+                effective_chat=SimpleNamespace(id=-1001, type="supergroup"),
+                effective_user=SimpleNamespace(id=42),
+                effective_message=SimpleNamespace(date=sent_at),
+            )
+
+        now = datetime.now(timezone.utc)
+        self.assertTrue(self.agent._allowed(update_at(now - timedelta(minutes=59))))
+        self.assertFalse(self.agent._allowed(update_at(now - timedelta(minutes=61))))
+
+    def test_current_callback_on_old_message_is_allowed(self):
+        update = SimpleNamespace(
+            callback_query=SimpleNamespace(data="agent:noop:0"),
+            effective_chat=SimpleNamespace(id=-1001, type="supergroup"),
+            effective_user=SimpleNamespace(id=42),
+            effective_message=SimpleNamespace(
+                date=datetime.now(timezone.utc) - timedelta(days=2)
+            ),
+        )
+        self.assertTrue(self.agent._allowed(update))
 
 
 class TelegramDebugTests(unittest.IsolatedAsyncioTestCase):

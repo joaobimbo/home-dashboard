@@ -104,6 +104,14 @@ or `WARNING` for failures only. If a normal group message creates no journal
 entry at all, Telegram did not deliver it to the bot; check BotFather group
 privacy or make the bot a group administrator.
 
+`AGENT_MAX_MESSAGE_AGE_SECONDS` defaults to `3600`. Telegram still delivers
+pending updates after a restart, preserving recent requests, but the agent
+silently discards older commands and natural-language messages before rate
+limiting, LLM calls, or device actions. The journal records each discard as
+`stale_message_dropped`. Current button taps are not rejected based on the age
+of the Telegram message that contains the button; confirmation tokens retain
+their separate ten-minute expiry.
+
 ## Persistence
 
 `AGENT_DATA_DIR` contains:

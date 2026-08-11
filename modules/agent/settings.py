@@ -16,6 +16,7 @@ class AgentSettings:
     data_dir: str
     dashboard_url: str
     timezone_name: str
+    max_message_age_seconds: int
 
     @classmethod
     def from_environment(cls):
@@ -33,6 +34,14 @@ class AgentSettings:
             raise RuntimeError("TELEGRAM_ALLOWED_CHAT_IDS must contain numeric chat IDs") from exc
         if not chats:
             raise RuntimeError("At least one TELEGRAM_ALLOWED_CHAT_IDS value is required")
+        try:
+            max_message_age_seconds = int(
+                os.environ.get("AGENT_MAX_MESSAGE_AGE_SECONDS", "3600")
+            )
+        except ValueError as exc:
+            raise RuntimeError("AGENT_MAX_MESSAGE_AGE_SECONDS must be an integer") from exc
+        if max_message_age_seconds <= 0:
+            raise RuntimeError("AGENT_MAX_MESSAGE_AGE_SECONDS must be positive")
 
         key_names = {
             "openai": "OPENAI_API_KEY",
@@ -58,4 +67,5 @@ class AgentSettings:
             data_dir=os.environ.get("AGENT_DATA_DIR", str(default_data)),
             dashboard_url=os.environ.get("DASHBOARD_URL", "http://127.0.0.1:5000"),
             timezone_name=os.environ.get("AGENT_TIMEZONE", "Europe/Lisbon"),
+            max_message_age_seconds=max_message_age_seconds,
         )
