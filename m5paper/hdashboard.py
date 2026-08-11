@@ -35,6 +35,8 @@ from M5 import Lcd
 # not an e-paper or network issue, just unread serial output backing up. Only
 # flip this to True for an active debugging session with a serial monitor
 # open, and back to False afterwards.
+# Set DEBUG to True while diagnosing a device over USB serial, then set it back
+# to False afterwards.
 DEBUG = False
 
 
@@ -43,13 +45,38 @@ def log(msg):
         print("[hdashboard] " + msg)
 
 
+def log_exception(context, exc):
+    """Add a labelled exception to the serial trace without changing the
+    normal on-device error handling path."""
+    if DEBUG:
+        print("[hdashboard] %s: %s: %s" % (context, type(exc).__name__, exc))
+        try:
+            sys.print_exception(exc)
+        except Exception:
+            pass
+
+
+def log_result(method, path, result):
+    """Log compact response shape/status; avoid dumping device data or secrets."""
+    if not DEBUG:
+        return
+    if isinstance(result, dict):
+        log("%s %s -> dict ok=%s error=%s" % (
+            method, path, result.get("ok"), result.get("error")))
+    elif isinstance(result, list):
+        failures = sum(1 for item in result if isinstance(item, dict) and item.get("ok") is False)
+        log("%s %s -> list rows=%d failures=%d" % (method, path, len(result), failures))
+    else:
+        log("%s %s -> %s" % (method, path, type(result).__name__))
+
+
 # ============================================================
 # Configuration - edit these before uploading
 # ============================================================
 
 # LAN address of the Flask dashboard server, e.g. "http://192.168.1.50:5000"
 # (find it from what `python app.py` prints on startup, or `hostname -I` on the host).
-SERVER_URL = "http://192.168.1.208:5000"
+SERVER_URL = "http://192.168.1.222:5000"
 
 # Weather polling cadence, in milliseconds - the only thing polled on a timer.
 # Shelly/AC device state is deliberately NOT polled in the background: e-paper
@@ -68,9 +95,10 @@ FULL_REFRESH_EVERY = 20
 # How long the device light-sleeps between checks when idle, in milliseconds.
 # Touch wakes it immediately regardless of this value (confirmed: touch can
 # wake from light sleep on this board - see light_sleep_ms()), so this only
-# controls how stale the clock/weather/initial-sync-retry can get while
-# untouched, not how responsive taps feel. Deliberately long - the point of
-# light sleep is to actually stay asleep, not wake on a tight poll.
+# controls how stale the clock/steady-state weather poll can get while
+# untouched, not how responsive taps feel. Initial synchronization temporarily
+# uses INITIAL_SYNC_RETRY_MS instead. Deliberately long - the point of light
+# sleep is to actually stay asleep, not wake on a tight steady-state poll.
 TICK_MS = 60000
 
 # Local clock is offset from whatever the device's NTP-synced RTC holds
@@ -226,29 +254,59 @@ def light_sleep_ms(ms):
 # ============================================================
 
 
+def _note_server_connection(connected):
+    """Record transport reachability without coupling the HTTP helpers to
+    AppState construction order (setup creates app before making requests)."""
+    if app is not None:
+        app.server_connected = connected
+        # Keep the older aggregate field in sync for any external/debug code
+        # that still inspects it.
+        app.online = connected
+
+
 def _get(path):
+    log("GET %s ..." % path)
     try:
         resp = requests2.get(SERVER_URL + path)
     except Exception as exc:
+        _note_server_connection(False)
+        log_exception("GET %s transport failure" % path, exc)
         log("GET %s FAILED: %s" % (path, exc))
         return {"ok": False, "error": str(exc)}
+    _note_server_connection(True)
     try:
-        data = resp.json()
+        try:
+            data = resp.json()
+        except Exception as exc:
+            log_exception("GET %s JSON failure" % path, exc)
+            log("GET %s INVALID RESPONSE: %s" % (path, exc))
+            return {"ok": False, "error": "Invalid server response"}
     finally:
         resp.close()
+    log_result("GET", path, data)
     return data
 
 
 def _post(path, body):
+    log("POST %s ..." % path)
     try:
         resp = requests2.post(SERVER_URL + path, json=body, headers={"Content-Type": "application/json"})
     except Exception as exc:
+        _note_server_connection(False)
+        log_exception("POST %s transport failure" % path, exc)
         log("POST %s FAILED: %s" % (path, exc))
         return {"ok": False, "error": str(exc)}
+    _note_server_connection(True)
     try:
-        data = resp.json()
+        try:
+            data = resp.json()
+        except Exception as exc:
+            log_exception("POST %s JSON failure" % path, exc)
+            log("POST %s INVALID RESPONSE: %s" % (path, exc))
+            return {"ok": False, "error": "Invalid server response"}
     finally:
         resp.close()
+    log_result("POST", path, data)
     return data
 
 
@@ -260,24 +318,32 @@ def get_shelly_devices():
     return _get("/api/shelly/devices")
 
 
+def _device_result(device_id, result):
+    """Network failures have no device id; retain it so service-health and
+    per-device patching code can still attribute the failed request."""
+    if isinstance(result, dict) and "id" not in result:
+        result["id"] = device_id
+    return result
+
+
 def shelly_action(device_id, action):
-    return _post("/api/shelly/%s/action" % device_id, {"action": action})
+    return _device_result(device_id, _post("/api/shelly/%s/action" % device_id, {"action": action}))
 
 
 def shelly_cover_action(device_id, command):
-    return _post("/api/shelly/%s/cover_action" % device_id, {"command": command})
+    return _device_result(device_id, _post("/api/shelly/%s/cover_action" % device_id, {"command": command}))
 
 
 def shelly_position(device_id, position):
-    return _post("/api/shelly/%s/position" % device_id, {"position": position})
+    return _device_result(device_id, _post("/api/shelly/%s/position" % device_id, {"position": position}))
 
 
 def shelly_light_action(device_id, command):
-    return _post("/api/shelly/%s/light_action" % device_id, {"command": command})
+    return _device_result(device_id, _post("/api/shelly/%s/light_action" % device_id, {"command": command}))
 
 
 def shelly_light_level(device_id, brightness):
-    return _post("/api/shelly/%s/light_level" % device_id, {"brightness": brightness})
+    return _device_result(device_id, _post("/api/shelly/%s/light_level" % device_id, {"brightness": brightness}))
 
 
 def get_daikin_devices():
@@ -339,6 +405,11 @@ class AppState:
         self.daikin_devices = []   # merged configured + status, list of dicts
         self.weather = None
         self.online = True
+        self.server_connected = None
+        self.ac_accessible = None
+        self.lights_accessible = None
+        self.covers_accessible = None
+        self.weather_accessible = None
         self.active_tab = None
         self.active_modal = None   # None or {"type": ..., "device_id": ...}
         self.busy_ids = set()
@@ -353,6 +424,7 @@ class AppState:
         # boot-recovery safety net, not a return to background polling.
         self.shelly_loaded = False
         self.daikin_loaded = False
+        self.weather_loaded = False
 
     # --- tabs ---------------------------------------------------------------
 
@@ -385,11 +457,13 @@ class AppState:
     def refresh_shelly(self):
         configured = get_shelly_configured()
         if isinstance(configured, dict) and configured.get("ok") is False:
-            self.online = False
+            self.lights_accessible = False
+            self.covers_accessible = False
             return
         live = get_shelly_devices()
         if isinstance(live, dict) and live.get("ok") is False:
-            self.online = False
+            self.lights_accessible = False
+            self.covers_accessible = False
             return
 
         live_by_id = dict((d["id"], d) for d in live)
@@ -400,32 +474,43 @@ class AppState:
             merged.append(row)
 
         self.shelly_devices = merged
-        self.online = True
+        lights = [d for d in merged if d.get("component") != "cover"]
+        covers = [d for d in merged if d.get("component") == "cover"]
+        self.lights_accessible = all(d.get("ok") for d in lights) if lights else None
+        self.covers_accessible = all(d.get("ok") for d in covers) if covers else None
         self.shelly_loaded = True
 
-    def refresh_daikin(self, live=False):
+    def refresh_daikin(self, live=False, include_status=True):
         configured = get_daikin_devices()
         if isinstance(configured, dict) and configured.get("ok") is False:
-            self.online = False
+            self.ac_accessible = False
             return
 
         merged = []
+        status_results = []
         for cfg in configured:
+            if not include_status:
+                merged.append(dict(cfg))
+                continue
             status = get_daikin_status(cfg["id"], live=live)
+            status_results.append(bool(status.get("ok")))
             row = dict(cfg)
             if status.get("ok"):
                 row.update(status)
             merged.append(row)
 
         self.daikin_devices = merged
-        self.online = True
+        self.ac_accessible = all(status_results) if include_status and status_results else None
         self.daikin_loaded = True
 
     def refresh_weather(self):
         result = get_weather()
         if result.get("ok"):
             self.weather = result
+            self.weather_accessible = True
+            self.weather_loaded = True
             return True
+        self.weather_accessible = False
         return False
 
     # --- lookup (used for optimistic UI updates - see handle_action) --------
@@ -436,24 +521,50 @@ class AppState:
                 return d
         return None
 
+    def _refresh_shelly_accessibility(self, component):
+        is_cover = component == "cover"
+        devices = [d for d in self.shelly_devices if (d.get("component") == "cover") == is_cover]
+        accessible = all(d.get("ok") for d in devices) if devices else None
+        if is_cover:
+            self.covers_accessible = accessible
+        else:
+            self.lights_accessible = accessible
+
+    def _refresh_ac_accessibility(self):
+        self.ac_accessible = (
+            all(d.get("ok") for d in self.daikin_devices)
+            if self.daikin_devices else None
+        )
+
     # --- patch a single device from its own action's response ---------------
 
     def patch_shelly_device(self, response):
+        device = self.get_shelly_device(response.get("id"))
         if not response.get("ok"):
+            if device:
+                device["ok"] = False
+                self._refresh_shelly_accessibility(device.get("component"))
+            else:
+                self.lights_accessible = False
             log("shelly action failed: %s" % response.get("error"))
             return
-        for d in self.shelly_devices:
-            if d["id"] == response.get("id"):
-                d.update(response)
-                return
+        if device:
+            device.update(response)
+            self._refresh_shelly_accessibility(device.get("component"))
 
     def patch_daikin_device(self, response):
         if not response.get("ok"):
+            for d in self.daikin_devices:
+                if d["id"] == response.get("id"):
+                    d["ok"] = False
+                    break
+            self._refresh_ac_accessibility()
             log("daikin action failed: %s" % response.get("error"))
             return
         for d in self.daikin_devices:
             if d["id"] == response.get("id"):
                 d.update(response)
+                self._refresh_ac_accessibility()
                 return
 
     # --- busy tracking (mirrors static/app.js's is-busy class) --------------
@@ -614,6 +725,11 @@ def draw_tabs(app):
 def draw_body(app):
     if app.active_tab == TAB_AC:
         return draw_ac_list(app)
+    if app.active_tab is None:
+        x, y, w, h = body_rect()
+        draw_text("A ligar ao servidor...", x + 24, y + h // 2 - 20, size=2)
+        draw_text("Srv %s  Ver estado NET abaixo" % _server_id_suffix(), x + 24, y + h // 2 + 12, size=1)
+        return []
     devices = app.devices_for_tab(app.active_tab)
     return draw_device_grid(app, devices)
 
@@ -851,8 +967,24 @@ def draw_modal(app):
 def draw_footer(app):
     x, y, w, h = footer_rect()
     fill_rect(x, y, w, h, WHITE)
-    status = "Online" if app.online else "Offline - showing last known state"
-    draw_text(status, x + 8, _text_center_y(y, h, 2), size=2)
+
+    # Tiny, always-visible service health strip. A filled square is available,
+    # a crossed square is unavailable, and an empty square means the service
+    # has no configured devices (or has not been checked yet).
+    cursor_x = x + 8
+    text_y = _text_center_y(y, h, 1)
+    draw_text("Srv %s" % _server_id_suffix(), cursor_x, text_y, size=1)
+    cursor_x += 64
+    for label, available in (
+        ("NET", app.server_connected),
+        ("AC", app.ac_accessible),
+        ("LUZ", app.lights_accessible),
+        ("EST", app.covers_accessible),
+        ("WX", app.weather_accessible),
+    ):
+        _draw_status_indicator(cursor_x, y + (h - 10) // 2, available)
+        draw_text(label, cursor_x + 14, text_y, size=1)
+        cursor_x += 14 + len(label) * 8 + 12
 
     regions = []
     if app.active_tab in (TAB_LIGHTS, TAB_COVERS):
@@ -864,6 +996,31 @@ def draw_footer(app):
             regions.append(((x + w - 140, y, 60, h), {"kind": "page", "delta": -1}))
             regions.append(((x + w - 70, y, 60, h), {"kind": "page", "delta": 1}))
     return regions
+
+
+def _draw_status_indicator(x, y, available):
+    """Draw a legible 10px three-state icon using only monochrome primitives."""
+    fill_rect(x, y, 10, 10, WHITE)
+    if available is True:
+        fill_rect(x, y, 10, 10, BLACK)
+    else:
+        draw_rect(x, y, 10, 10, BLACK)
+        if available is False:
+            # Avoid Lcd.drawLine(): unlike fillRect/drawRect it is not
+            # confirmed on this UIFlow2 firmware. Five tiny rectangles form
+            # the same diagonal cross using primitives already used safely
+            # throughout the dashboard.
+            fill_rect(x + 2, y + 2, 2, 2, BLACK)
+            fill_rect(x + 6, y + 2, 2, 2, BLACK)
+            fill_rect(x + 4, y + 4, 2, 2, BLACK)
+            fill_rect(x + 2, y + 6, 2, 2, BLACK)
+            fill_rect(x + 6, y + 6, 2, 2, BLACK)
+
+
+def _server_id_suffix():
+    """Return the last hostname/IP segment without pulling in url parsing."""
+    host = SERVER_URL.split("://")[-1].split("/")[0].split(":")[0]
+    return host.split(".")[-1] or "?"
 
 
 def _clock_text():
@@ -890,7 +1047,7 @@ last_shelly_retry = 0
 last_daikin_retry = 0
 partial_redraws_since_full = 0
 
-INITIAL_SYNC_RETRY_MS = 5000  # boot-recovery only - see loop() (throttled by TICK_MS anyway)
+INITIAL_SYNC_RETRY_MS = 5000  # boot-recovery only - see loop()
 
 
 def _current_minute():
@@ -995,14 +1152,53 @@ def redraw_header_only():
     partial_redraws_since_full += 1
 
 
+def redraw_footer_only():
+    """Scoped redraw for status changes; footer page hit regions stay valid."""
+    global partial_redraws_since_full
+    if _due_for_full_refresh():
+        redraw(full=True)
+        return
+    begin_frame(full=False)
+    begin_batch()
+    new_regions = draw_footer(app)
+    end_batch()
+    app.hit_regions = [(r, a) for (r, a) in app.hit_regions if a.get("kind") != "page"] + new_regions
+    partial_redraws_since_full += 1
+
+
+def _status_signature():
+    return (
+        app.server_connected,
+        app.ac_accessible,
+        app.lights_accessible,
+        app.covers_accessible,
+        app.weather_accessible,
+    )
+
+
+def _run_setup_phase(label, callback):
+    """Run one boot phase with an unmistakable serial breadcrumb."""
+    log("setup: BEGIN %s" % label)
+    try:
+        result = callback()
+    except Exception as exc:
+        log_exception("setup: FAILED %s" % label, exc)
+        raise
+    log("setup: END %s" % label)
+    return result
+
+
 def _with_busy_row(device_id, action_fn):
     """AC actions are real ~10s BLE round trips, so unlike lights/covers they
     get a visible busy state - scoped to just that row."""
+    old_status = _status_signature()
     app.set_busy(device_id, True)
     redraw_ac_row(device_id)
     action_fn()
     app.set_busy(device_id, False)
     redraw_ac_row(device_id)
+    if _status_signature() != old_status:
+        redraw_footer_only()
 
 
 def _apply_modal_choice(modal, value):
@@ -1064,10 +1260,13 @@ def handle_action(action):
             guess = "off" if device.get("state") == "on" else "on"
             device["state"] = guess
             redraw_tile(device_id)
+        old_status = _status_signature()
         response = shelly_action(device_id, "toggle")
         app.patch_shelly_device(response)
         if not (response.get("ok") and response.get("state") == guess):
             redraw_tile(device_id)
+        if _status_signature() != old_status:
+            redraw_footer_only()
 
     elif kind == "light_power":
         device_id = action["device_id"]
@@ -1076,10 +1275,13 @@ def handle_action(action):
         if device:
             device["state"] = command  # optimistic - see switch_toggle above
             redraw_tile(device_id)
+        old_status = _status_signature()
         response = shelly_light_action(device_id, command)
         app.patch_shelly_device(response)
         if not (response.get("ok") and response.get("state") == command):
             redraw_tile(device_id)
+        if _status_signature() != old_status:
+            redraw_footer_only()
 
     elif kind == "cover_cmd":
         device_id = action["device_id"]
@@ -1089,10 +1291,13 @@ def handle_action(action):
         if device and guess:
             device["state"] = guess  # optimistic - see switch_toggle above
             redraw_tile(device_id)
+        old_status = _status_signature()
         response = shelly_cover_action(device_id, command)
         app.patch_shelly_device(response)
         if not (response.get("ok") and response.get("state") == guess):
             redraw_tile(device_id)
+        if _status_signature() != old_status:
+            redraw_footer_only()
 
     elif kind == "ac_power":
         device_id = action["device_id"]
@@ -1122,26 +1327,35 @@ def setup():
     global app, last_weather, last_displayed_minute
     global last_shelly_retry, last_daikin_retry
 
-    log("setup(): calling hw_init()")
-    hw_init()
+    log("setup(): starting; SERVER_URL=%s DEBUG=%s" % (SERVER_URL, DEBUG))
+    _run_setup_phase("hardware init", hw_init)
     log("setup(): hw_init() done, WIDTH=%s HEIGHT=%s" % (WIDTH, HEIGHT))
-    app = AppState()
+    app = _run_setup_phase("state init", AppState)
 
     log("setup(): fetching shelly devices from %s" % SERVER_URL)
-    app.refresh_shelly()
-    log("setup(): shelly online=%s devices=%d" % (app.online, len(app.shelly_devices)))
+    _run_setup_phase("Shelly refresh", app.refresh_shelly)
+    log("setup(): shelly online=%s loaded=%s devices=%d lights=%s covers=%s" % (
+        app.online, app.shelly_loaded, len(app.shelly_devices),
+        app.lights_accessible, app.covers_accessible))
 
     log("setup(): fetching daikin devices")
-    app.refresh_daikin()
-    log("setup(): daikin online=%s devices=%d" % (app.online, len(app.daikin_devices)))
+    # Do not make first paint depend on BLE/BlueZ. On a host with a missing or
+    # broken Bluetooth adapter, a Daikin status request can take tens of
+    # seconds per configured unit. The configured AC rows are enough to render
+    # the dashboard; status is fetched when the AC tab is selected or a row's
+    # Sync control is pressed.
+    _run_setup_phase("Daikin configuration refresh", lambda: app.refresh_daikin(include_status=False))
+    log("setup(): daikin online=%s loaded=%s devices=%d ac=%s" % (
+        app.online, app.daikin_loaded, len(app.daikin_devices), app.ac_accessible))
 
     log("setup(): fetching weather")
-    app.refresh_weather()
-    log("setup(): weather=%s" % (app.weather,))
+    _run_setup_phase("weather refresh", app.refresh_weather)
+    log("setup(): weather loaded=%s accessible=%s present=%s" % (
+        app.weather_loaded, app.weather_accessible, app.weather is not None))
 
-    app.ensure_active_tab()
+    _run_setup_phase("choose active tab", app.ensure_active_tab)
     log("setup(): active_tab=%s available_tabs=%s" % (app.active_tab, app.available_tabs()))
-    redraw(full=True)
+    _run_setup_phase("initial redraw", lambda: redraw(full=True))
     log("setup(): done")
 
     now = time.ticks_ms()
@@ -1168,10 +1382,8 @@ def loop():
         time.sleep_ms(200)  # debounce: ignore rapid repeat taps
         return  # prioritize the next touch poll over ambient checks below
 
-    # Ambient: clock/weather/boot-recovery. No separate elapsed-time gate
-    # needed here anymore - TICK_MS itself (60s) is now the throttle, since
-    # the device is asleep between iterations rather than looping every
-    # 100ms.
+    # Ambient: clock/weather/boot-recovery. The device sleeps between
+    # iterations: 5s while initial data is still missing, then 60s normally.
     now = time.ticks_ms()
 
     current_minute = _current_minute()
@@ -1179,10 +1391,17 @@ def loop():
         last_displayed_minute = current_minute
         redraw_header_only()
 
-    if time.ticks_diff(now, last_weather) >= WEATHER_POLL_MS:
+    # A failed first weather request is a boot-sync problem, not a normal
+    # 15-minute poll: retry it promptly while Wi-Fi is coming up. Once it has
+    # succeeded, return to the battery-friendly steady-state cadence.
+    weather_interval = WEATHER_POLL_MS if app.weather_loaded else INITIAL_SYNC_RETRY_MS
+    if time.ticks_diff(now, last_weather) >= weather_interval:
         last_weather = now
+        old_status = _status_signature()
         if app.refresh_weather():
             redraw_header_only()
+        if _status_signature() != old_status:
+            redraw_footer_only()
 
     # Boot-recovery retry: if the *initial* sync at setup() failed (e.g.
     # Wi-Fi wasn't fully up yet), keep retrying every INITIAL_SYNC_RETRY_MS
@@ -1206,7 +1425,18 @@ def loop():
             app.ensure_active_tab()
             redraw(full=True)
 
-    light_sleep_ms(TICK_MS)
+    # Keep the documented 5-second boot recovery real. Previously the loop
+    # always slept for TICK_MS (60s), so INITIAL_SYNC_RETRY_MS could never
+    # actually take effect; failed weather then stayed stale for 15 minutes.
+    initial_sync_pending = (
+        not app.shelly_loaded
+        or not app.daikin_loaded
+        or not app.weather_loaded
+    )
+    log("loop: sleeping %dms (initial_sync_pending=%s)" % (
+        INITIAL_SYNC_RETRY_MS if initial_sync_pending else TICK_MS,
+        initial_sync_pending))
+    light_sleep_ms(INITIAL_SYNC_RETRY_MS if initial_sync_pending else TICK_MS)
 
 
 log("hdashboard.py: starting")
@@ -1215,6 +1445,7 @@ try:
     while True:
         loop()
 except (Exception, KeyboardInterrupt) as e:
+    log_exception("main loop crashed", e)
     print("[hdashboard] CRASHED - full traceback follows:")
     sys.print_exception(e)
     try:
