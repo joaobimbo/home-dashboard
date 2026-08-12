@@ -73,6 +73,8 @@ class TelegramAgent:
         self.application.add_handler(CommandHandler("help", self.help_command))
         self.application.add_handler(CommandHandler("devices", self.devices_command))
         self.application.add_handler(CommandHandler("status", self.status_command))
+        self.application.add_handler(CommandHandler("on", self.on_command))
+        self.application.add_handler(CommandHandler("off", self.off_command))
         self.application.add_handler(CommandHandler("debug", self.debug_command))
         self.application.add_handler(CommandHandler("rules", self.rules_command))
         self.application.add_handler(CommandHandler("enable", self.enable_command))
@@ -141,6 +143,8 @@ class TelegramAgent:
             "Send a home-control request in natural language.\n\n"
             "/devices — configured devices\n"
             "/status — current device status\n"
+            "/on — choose an off device to turn on\n"
+            "/off — choose an on device to turn off\n"
             "/debug — agent and dashboard diagnostics\n"
             "/rules — saved automations\n"
             "/enable — choose a disabled rule\n"
@@ -176,6 +180,20 @@ class TelegramAgent:
             await update.effective_message.reply_text("\n".join(lines))
         except DashboardError as exc:
             await update.effective_message.reply_text(f"Dashboard error: {exc}")
+
+    async def on_command(self, update, _context):
+        await self._power_menu_command(update, "on")
+
+    async def off_command(self, update, _context):
+        await self._power_menu_command(update, "off")
+
+    async def _power_menu_command(self, update, desired_state: str):
+        if not self._allowed(update):
+            return
+        if not self._consume_rate_limit(update):
+            await update.effective_message.reply_text("Too many requests; please wait a minute.")
+            return
+        await self._send_power_menu(update, desired_state)
 
     async def debug_command(self, update, _context):
         chat = update.effective_chat
@@ -318,8 +336,11 @@ class TelegramAgent:
             )
             await update.effective_message.reply_text("Too many requests; please wait a minute.")
             return
-        request_id = uuid.uuid4().hex[:10]
         incoming_message = update.effective_message.text.strip()
+        if incoming_message.casefold() in {"on", "off"}:
+            await self._send_power_menu(update, incoming_message.casefold())
+            return
+        request_id = uuid.uuid4().hex[:10]
         message = incoming_message
         key = (int(update.effective_chat.id), int(update.effective_user.id))
         previous = self._clarifications.pop(key, None)
@@ -530,6 +551,9 @@ class TelegramAgent:
         if not query or not self._allowed(update):
             return
         parts = str(query.data or "").split(":")
+        if len(parts) == 3 and parts[:2] == ["agent", "power"]:
+            await self._power_select_callback(update, query, parts[2])
+            return
         if len(parts) == 4 and parts[:2] == ["agent", "page"]:
             await self._rule_page_callback(query, parts[2], parts[3])
             return
@@ -589,6 +613,177 @@ class TelegramAgent:
                 await query.edit_message_text(f"Deleted automation '{rule['name']}'.")
             except KeyError:
                 await query.edit_message_text("That automation no longer exists.")
+
+    async def _send_power_menu(self, update, desired_state: str):
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+        try:
+            catalog, snapshot = await asyncio.gather(
+                asyncio.to_thread(self.client.catalog),
+                asyncio.to_thread(self.client.snapshot, False),
+            )
+        except DashboardError as exc:
+            await update.effective_message.reply_text(f"Dashboard error: {exc}")
+            return
+
+        candidates = self._power_candidates(catalog, snapshot, desired_state)
+        if not candidates:
+            message = (
+                "All switchable devices are already on."
+                if desired_state == "on"
+                else "All switchable devices are already off."
+            )
+            await update.effective_message.reply_text(message)
+            return
+
+        rows = []
+        for device in candidates:
+            action = self._power_action(device, desired_state)
+            token = self._new_pending("power", update, {"action": action})
+            icon = "❄️" if device.get("kind") == "daikin" else "💡"
+            label = f"{icon} {device['display_name']} · {device.get('room') or 'Casa'}"
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        label,
+                        callback_data=f"agent:power:{token}",
+                    )
+                ]
+            )
+        title = (
+            "Choose an off device to turn on:"
+            if desired_state == "on"
+            else "Choose an on device to turn off:"
+        )
+        await update.effective_message.reply_text(
+            title,
+            reply_markup=InlineKeyboardMarkup(rows),
+        )
+
+    @classmethod
+    def _power_candidates(cls, catalog, snapshot, desired_state: str):
+        if desired_state not in {"on", "off"}:
+            raise ValueError("Invalid desired power state")
+        current_required = "off" if desired_state == "on" else "on"
+        statuses = snapshot.get("devices", {}) if isinstance(snapshot, dict) else {}
+        candidates = []
+        for device in catalog:
+            if "power" not in device.get("capabilities", []):
+                continue
+            status = statuses.get(device.get("id"), {})
+            if cls._current_power_state(device, status) == current_required:
+                candidates.append(device)
+        return sorted(
+            candidates,
+            key=lambda item: (
+                str(item.get("room") or "Casa").casefold(),
+                str(item.get("display_name") or "").casefold(),
+            ),
+        )
+
+    @staticmethod
+    def _current_power_state(device, status) -> Optional[str]:
+        if not isinstance(status, dict) or not status.get("ok"):
+            return None
+        value = status.get("power") if device.get("kind") == "daikin" else status.get("state")
+        if isinstance(value, bool):
+            return "on" if value else "off"
+        normalized = str(value).strip().lower()
+        return normalized if normalized in {"on", "off"} else None
+
+    @staticmethod
+    def _power_action(device, desired_state: str):
+        return {
+            "device_id": str(device["id"]),
+            "device_kind": str(device["kind"]),
+            "component": device.get("component"),
+            "display_name": str(device["display_name"]),
+            "operation": "power",
+            "parameters": {"state": desired_state},
+        }
+
+    async def _power_select_callback(self, update, query, token: str):
+        pending = self._pending.pop(token, None)
+        if not pending or float(pending["expires_at"]) < time.monotonic():
+            await query.answer()
+            await query.edit_message_text("This device menu expired. Send on or off again.")
+            return
+        if (
+            pending.get("kind") != "power"
+            or int(pending["user_id"]) != int(update.effective_user.id)
+            or int(pending["chat_id"]) != int(update.effective_chat.id)
+        ):
+            self._pending[token] = pending
+            await query.answer("Only the person who opened this menu can use it.", show_alert=True)
+            return
+
+        await query.answer()
+        proposed = pending["payload"]["action"]
+        desired_state = proposed["parameters"]["state"]
+        try:
+            catalog, snapshot = await asyncio.gather(
+                asyncio.to_thread(self.client.catalog),
+                asyncio.to_thread(self.client.snapshot, False),
+            )
+            device = next(
+                (
+                    item
+                    for item in catalog
+                    if item.get("id") == proposed.get("device_id")
+                    and item.get("kind") == proposed.get("device_kind")
+                    and "power" in item.get("capabilities", [])
+                ),
+                None,
+            )
+            if device is None:
+                raise DashboardError("The selected device is no longer configured")
+            status = snapshot.get("devices", {}).get(device["id"], {})
+            current_state = self._current_power_state(device, status)
+            if current_state is None:
+                raise DashboardError("The selected device status is unavailable")
+            if current_state == desired_state:
+                await query.edit_message_text(
+                    f"{device['display_name']} is already {desired_state}."
+                )
+                return
+
+            action = self._power_action(device, desired_state)
+            await query.edit_message_text(
+                f"Turning {device['display_name']} {desired_state}…"
+            )
+            logger.info(
+                "menu_power_started user_id=%s device_id=%s state=%s",
+                int(update.effective_user.id),
+                action["device_id"],
+                desired_state,
+            )
+            result = await asyncio.to_thread(self.client.execute, action)
+            self.store.audit(
+                "menu_power_succeeded",
+                user_id=int(update.effective_user.id),
+                operation="power",
+                device_id=action["device_id"],
+                state=desired_state,
+            )
+            logger.info(
+                "menu_power_succeeded user_id=%s device_id=%s state=%s result=%r",
+                int(update.effective_user.id),
+                action["device_id"],
+                desired_state,
+                result,
+            )
+            await query.edit_message_text(
+                f"{device['display_name']} turned {desired_state}."
+            )
+        except DashboardError as exc:
+            logger.warning(
+                "menu_power_failed user_id=%s device_id=%s state=%s error=%s",
+                int(update.effective_user.id),
+                proposed.get("device_id"),
+                desired_state,
+                exc,
+            )
+            await query.edit_message_text(f"Could not switch the device: {exc}")
 
     async def _send_rule_menu(self, update, action: str, page: int = 0):
         text, keyboard = self._build_rule_menu(action, page)

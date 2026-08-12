@@ -54,6 +54,8 @@ Available commands:
 
 - `/devices`
 - `/status`
+- `/on` — shows devices that are off; tap one to turn it on
+- `/off` — shows devices that are on; tap one to turn it off
 - `/debug` — authorization, engine, rules, and dashboard catalog diagnostics
 - `/rules`
 - `/enable` — opens a paginated menu of disabled rules
@@ -62,6 +64,11 @@ Available commands:
 
 The older `/enable <rule-id>`, `/disable <rule-id>`, and `/delete <rule-id>`
 forms remain available for scripting and troubleshooting.
+
+Sending the exact text `on` or `off` provides the same device menus without an
+LLM call. Only devices with the existing `power` capability and a known current
+state are shown. Menu buttons use short-lived tokens bound to the requesting
+user and chat; the catalog and status are checked again before the action runs.
 
 Immediate, valid device actions run directly. Creating/replacing and deleting
 saved automations requires an inline confirmation from the person who made the

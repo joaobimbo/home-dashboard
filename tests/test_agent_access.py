@@ -142,5 +142,109 @@ class TelegramRuleMenuTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("countdown restarted", message)
 
 
+class TelegramPowerMenuTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.agent = TelegramAgent.__new__(TelegramAgent)
+        self.agent.allowed_chat_ids = frozenset({-1001})
+        self.agent.max_message_age_seconds = 3600
+        self.agent._pending = {}
+        self.agent.store = mock.Mock()
+        self.agent.client = mock.Mock()
+        self.catalog = [
+            {
+                "token": "S1",
+                "id": "office-light",
+                "kind": "shelly",
+                "component": "switch",
+                "display_name": "Office light",
+                "room": "Office",
+                "capabilities": ["status", "power", "toggle"],
+            },
+            {
+                "token": "A1",
+                "id": "office-ac",
+                "kind": "daikin",
+                "component": "ac",
+                "display_name": "Office AC",
+                "room": "Office",
+                "capabilities": ["status", "power", "ac_mode"],
+            },
+            {
+                "token": "S2",
+                "id": "office-cover",
+                "kind": "shelly",
+                "component": "cover",
+                "display_name": "Office cover",
+                "room": "Office",
+                "capabilities": ["status", "cover", "position"],
+            },
+        ]
+        self.snapshot = {
+            "devices": {
+                "office-light": {"ok": True, "state": "off"},
+                "office-ac": {"ok": True, "power": True},
+                "office-cover": {"ok": True, "state": "closed"},
+            },
+            "weather": None,
+        }
+        self.agent.client.catalog.return_value = self.catalog
+        self.agent.client.snapshot.return_value = self.snapshot
+        self.agent.client.execute.return_value = {"ok": True, "state": "on"}
+
+    @staticmethod
+    def update(message=None, query=None):
+        return SimpleNamespace(
+            callback_query=query,
+            effective_chat=SimpleNamespace(id=-1001, type="supergroup"),
+            effective_user=SimpleNamespace(id=42),
+            effective_message=message,
+        )
+
+    def test_power_candidates_filter_by_live_state_and_capability(self):
+        turn_on = self.agent._power_candidates(self.catalog, self.snapshot, "on")
+        turn_off = self.agent._power_candidates(self.catalog, self.snapshot, "off")
+        self.assertEqual([item["id"] for item in turn_on], ["office-light"])
+        self.assertEqual([item["id"] for item in turn_off], ["office-ac"])
+
+    async def test_on_menu_uses_bound_token_and_executes_rechecked_action(self):
+        message = SimpleNamespace(reply_text=mock.AsyncMock())
+        update = self.update(message=message)
+        run_inline = mock.AsyncMock(side_effect=lambda function, *args: function(*args))
+        with mock.patch("modules.agent.bot.asyncio.to_thread", new=run_inline):
+            await self.agent._send_power_menu(update, "on")
+
+            keyboard = message.reply_text.await_args.kwargs["reply_markup"]
+            button = keyboard.inline_keyboard[0][0]
+            self.assertIn("Office light", button.text)
+            self.assertNotIn("office-light", button.callback_data)
+
+            query = SimpleNamespace(
+                data=button.callback_data,
+                answer=mock.AsyncMock(),
+                edit_message_text=mock.AsyncMock(),
+            )
+            callback_update = self.update(message=message, query=query)
+            await self.agent.callback(callback_update, None)
+
+        action = self.agent.client.execute.call_args.args[0]
+        self.assertEqual(action["device_id"], "office-light")
+        self.assertEqual(action["parameters"], {"state": "on"})
+        self.assertIn("turned on", query.edit_message_text.await_args.args[0])
+
+    async def test_exact_on_message_bypasses_provider(self):
+        self.agent._consume_rate_limit = mock.Mock(return_value=True)
+        self.agent._send_power_menu = mock.AsyncMock()
+        message = SimpleNamespace(
+            text="ON",
+            date=datetime.now(timezone.utc),
+            reply_text=mock.AsyncMock(),
+        )
+        update = self.update(message=message)
+
+        await self.agent.natural_language(update, None)
+
+        self.agent._send_power_menu.assert_awaited_once_with(update, "on")
+
+
 if __name__ == "__main__":
     unittest.main()
