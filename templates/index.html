@@ -76,25 +76,6 @@
       {% endmacro %}
 
       <main class="layout">
-        <section class="panel agent-panel" aria-labelledby="agent-title">
-          <div class="panel-head">
-            <h2 id="agent-title">Assistente da casa</h2>
-          </div>
-          {% if web_agent_available %}
-          <form id="agent-form" class="agent-form">
-            <label class="agent-label" for="agent-message">Peça uma ação, estado ou automação</label>
-            <textarea id="agent-message" maxlength="1000" rows="2" placeholder="Ex.: Liga a luz RGB vermelha às 17:00"></textarea>
-            <button type="submit" class="cover-modal-btn is-primary" id="agent-send">Enviar</button>
-          </form>
-          <pre class="agent-result" id="agent-result" aria-live="polite" hidden></pre>
-          <div class="cover-modal-actions agent-confirm-actions" id="agent-confirm-actions" hidden>
-            <button type="button" class="cover-modal-btn" id="agent-cancel">Cancelar</button>
-            <button type="button" class="cover-modal-btn is-primary" id="agent-confirm">Guardar automação</button>
-          </div>
-          {% else %}
-          <p class="agent-unavailable">O assistente não está configurado neste servidor.</p>
-          {% endif %}
-        </section>
         <section class="panel" aria-labelledby="devices-title">
           <div class="panel-head">
             <h2 id="devices-title">Dispositivos</h2>
@@ -158,6 +139,25 @@
             </div>
             {% endif %}
           </div>
+        </section>
+        <section class="panel agent-panel" aria-labelledby="agent-title">
+          <div class="panel-head">
+            <h2 id="agent-title">Assistente da casa</h2>
+          </div>
+          {% if web_agent_available %}
+          <form id="agent-form" class="agent-form">
+            <label class="agent-label" for="agent-message">Peça uma ação, estado ou automação</label>
+            <textarea id="agent-message" maxlength="1000" rows="2" placeholder="Ex.: Liga a luz RGB vermelha às 17:00"></textarea>
+            <button type="submit" class="cover-modal-btn is-primary" id="agent-send">Enviar</button>
+          </form>
+          <pre class="agent-result" id="agent-result" aria-live="polite" hidden></pre>
+          <div class="cover-modal-actions agent-confirm-actions" id="agent-confirm-actions" hidden>
+            <button type="button" class="cover-modal-btn" id="agent-cancel">Cancelar</button>
+            <button type="button" class="cover-modal-btn is-primary" id="agent-confirm">Guardar automação</button>
+          </div>
+          {% else %}
+          <p class="agent-unavailable">O assistente não está configurado neste servidor.</p>
+          {% endif %}
         </section>
       </main>
     </div>
