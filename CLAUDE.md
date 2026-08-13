@@ -8,7 +8,7 @@ This is a local home dashboard: Flask backend + Jinja/vanilla-JS frontend for co
 
 - Python + Flask + Jinja + plain HTML/CSS + small vanilla JS.
 - No Node/npm/frontend framework migration, no Docker, no DB by default.
-- Do not add Spotify/calendar/photos/voice features unless explicitly requested.
+- Spotify Connect playback is part of the dashboard. Do not add calendar, photos, or voice features unless explicitly requested.
 
 ## Commands
 
@@ -24,6 +24,7 @@ This is a local home dashboard: Flask backend + Jinja/vanilla-JS frontend for co
 
 - `ShellyController` (`modules/shelly/controller.py`) — HTTP/local-network calls to Shelly devices.
 - `DaikinController` (`modules/daikin/controller.py`) — BLE calls to Madoka thermostats via `pymadoka`.
+- `SpotifyController` (`modules/spotify/controller.py`) — server-side OAuth and Spotify Connect Web API calls; it remains optional when its environment variables are absent.
 
 Both controllers follow the same `from_sources()` pattern, in priority order:
 1. `modules/<name>/devices.json` (checked in, hand-edited/discovery-generated)
@@ -31,6 +32,8 @@ Both controllers follow the same `from_sources()` pattern, in priority order:
 3. hardcoded fallback — Shelly has one; Daikin does not (MAC addresses are household-specific, so an empty list is used instead)
 
 The browser never talks to devices directly — it only calls Flask JSON endpoints (`/api/shelly/*`, `/api/daikin/*`, `/api/scenes*`), which the controllers then translate into device I/O. Keep new device features behind this same indirection.
+
+Spotify playback uses `/api/spotify/*`; access/refresh tokens never reach the browser. The Música tab controls live playback and search only. Timed Spotify requests belong to the Telegram automation agent. Raspotify/librespot is an external system service for the server's analog output, not a Flask child process.
 
 Scene endpoints (`/api/scenes*`) are backed by `modules/shelly/scenes.py::SceneStore` and remain live in the backend even though the current UI doesn't surface them.
 

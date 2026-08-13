@@ -2,8 +2,8 @@
 
 ## Scope (current project)
 
-- Keep this repo focused on local dashboard + Shelly controls.
-- Do not add Spotify/calendar/photos/voice features unless explicitly requested.
+- Keep this repo focused on the local dashboard: Shelly controls, Daikin AC, Spotify Connect playback, and the household automation agent.
+- Do not add calendar, photos, or voice features unless explicitly requested.
 - Keep stack minimal: Python + Flask + Jinja + plain HTML/CSS + small vanilla JS (no Node/npm/framework migration, no Docker, no DB by default).
 
 ## Runtime and verification
@@ -22,8 +22,16 @@
   - Daikin/Madoka APIs: `/api/daikin/*`
   - scenes APIs still exist in backend (`/api/scenes*`) even if UI is currently trimmed.
   - weather: `/api/weather` — server-side fetch of `wttr.in` (see `modules/weather.py`), cached in-process for 30 minutes so the header widget doesn't hit the external service on every page load/poll. Frontend polls it every 15 minutes (`startWeatherPolling()` in `static/app.js`).
+  - Spotify APIs: `/api/spotify/*` — OAuth and Spotify Web API requests remain server-side in `modules/spotify/`; the browser must never receive Spotify credentials or tokens.
 - Frontend entrypoints: `templates/index.html`, `static/app.js`, `static/style.css`.
-- Devices are grouped into category tabs (AC / Luzes / Estores) in `templates/index.html` — Shelly `devices` is split server-side into `lights_devices` (everything except `component == 'cover'`) and `covers_devices` via Jinja `selectattr`/`rejectattr`, with a shared `device_card()` macro to avoid duplicating the card markup. All categories are rendered into the DOM up front (nothing is fetched on tab switch); `showCategory()` in `static/app.js` just toggles the `hidden` attribute on `[data-category-section]` containers, so switching tabs is instant and background polling keeps every category's data fresh even while hidden. `.ac-list`/`.device-list` set an explicit `display`, so `[hidden]` needs an explicit `display: none` override in `static/style.css` (same pattern already used for `.cover-modal[hidden]`).
+- Devices are grouped into category tabs (Música / AC / Luzes / Estores) in `templates/index.html`. The Música tab is an interactive Spotify player; saved/timed Spotify actions belong in the automation agent, not in the dashboard UI. All categories are rendered into the DOM up front (nothing is fetched on tab switch); `showCategory()` only toggles `hidden`.
+
+## Spotify conventions
+
+- `modules/spotify/controller.py` is the server-side Spotify Connect controller. It is optional when credentials are missing; the rest of the dashboard must still start.
+- The dashboard controls one active Spotify session and transfers it between currently available Connect devices. Do not hard-code device IDs or add Alexa/Google Cast integrations.
+- Raspotify/librespot is a separate system service which exposes the server's analog-jack receiver. Flask must not launch or supervise it.
+- Agent pause/next/previous actions target the active Spotify session; transfers and play requests use an available output device.
 
 ## Shelly module conventions
 

@@ -5,6 +5,11 @@ requests to one configured cloud LLM, validates the returned rule locally,
 and calls only the dashboard API at `127.0.0.1:5000`. Model output is never
 executed as Python or passed to a shell.
 
+It also starts a private, loopback-only web bridge on `127.0.0.1:5001` by
+default. The Flask dashboard forwards web-agent requests to that bridge, so
+only this service needs LLM credentials. Set `AGENT_WEB_PORT` only when the
+default port is occupied.
+
 ## Telegram setup
 
 1. Create the bot with BotFather and add it to the private household group.
@@ -145,3 +150,14 @@ example "open the bedroom blinds every day at 7am". Clock conditions can also
 restrict another trigger with equal, before/after, or between comparisons. The
 agent receives the current local date and time when interpreting requests, and
 the confirmation preview shows the exact schedule and timezone before saving.
+
+## Spotify automations
+
+When Spotify is authenticated on the dashboard, the catalog includes a global
+`Spotify playback` target for pause/next/previous and the currently available
+Spotify Connect outputs for transfers and starting music. Device IDs are
+refreshed from Spotify at request time and must never be hard-coded.
+
+Examples: “pause Spotify in 10 minutes”, “move Spotify to Escritorio at 7am”,
+or “play playlist Morning on Sala Hi-Fi tomorrow at 7am”. Automation previews
+must be confirmed before they are saved.

@@ -2,7 +2,7 @@
 
 ## Spotify Connect
 
-The Flask service controls Spotify; Raspotify/librespot is a separate Spotify Connect receiver on the same machine for the Hi-Fi. Never put Spotify passwords in a systemd unit.
+The Flask service controls one Spotify Connect playback session. The Música tab can search tracks, albums, and playlists; choose an available Connect output, then play, pause, skip, transfer, or set volume. Raspotify/librespot is a separate receiver on the same machine for the Hi-Fi. Never put Spotify passwords in a systemd unit.
 
 Set these on the dashboard service, register the exact redirect URI in the Spotify Developer Dashboard, restart it, then open `/api/spotify/login` once:
 
@@ -23,4 +23,4 @@ LIBRESPOT_BACKEND=alsa
 LIBRESPOT_DEVICE="plughw:CARD=Intel,DEV=0"
 ```
 
-Use `aplay -L` to find the actual audio output; do not copy the example if your host differs. Restart with `sudo systemctl restart raspotify`. The Música tab lists all currently available Spotify Connect targets, so Echo and Google speakers appear automatically when Spotify exposes them.
+Use `aplay -L` to find the actual audio output; do not copy the example if your host differs. Restart with `sudo systemctl restart raspotify`. The Música tab lists only devices Spotify currently reports as available, so an Echo, Google speaker, or Raspotify receiver may disappear while offline. Timed Spotify playback is created through the automation agent, not the Música tab.
