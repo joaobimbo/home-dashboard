@@ -356,38 +356,62 @@ class DaikinController:
                     None,
                 )
 
-            madoka = lib["Controller"](device.address, adapter=device.adapter)
-            if matched is not None:
-                # pymadoka's own connect loop always burns a wasted first
-                # iteration (just wraps the device we already found) plus a
-                # flat 2s sleep after it. Handing it a pre-built BleakClient
-                # skips straight to the real connect attempt.
-                #
-                # Also skip pymadoka's own on_disconnect callback: it
-                # unconditionally schedules a reconnect (asyncio.create_task)
-                # on every disconnect, including our own deliberate one at
-                # the end of this request - that reconnect attempt races
-                # against our shutdown and is what produces BlueZ's
-                # "Operation already in progress" / "br-connection-canceled"
-                # errors. We manage the connect/disconnect lifecycle
-                # ourselves once per request, so auto-reconnect is unwanted.
-                madoka.connection.client = lib["BleakClient"](
-                    matched,
-                    adapter=device.adapter,
-                    disconnected_callback=lambda _client: None,
-                )
-            await asyncio.wait_for(madoka.start(), timeout=self._connect_timeout)
+            # A request owns exactly one connect/disconnect cycle. In
+            # particular, disable pymadoka's retry loop: it catches a task
+            # cancellation while Bleak is connecting and can otherwise keep
+            # opening system-bus connections after our timeout has expired.
+            madoka = lib["Controller"](
+                device.address, adapter=device.adapter, reconnect=False
+            )
             try:
+                if matched is not None:
+                    # pymadoka's own connect loop always burns a wasted first
+                    # iteration (just wraps the device we already found) plus a
+                    # flat 2s sleep after it. Handing it a pre-built BleakClient
+                    # skips straight to the real connect attempt.
+                    #
+                    # Also skip pymadoka's own on_disconnect callback: it
+                    # unconditionally schedules a reconnect (asyncio.create_task)
+                    # on every disconnect, including our own deliberate one at
+                    # the end of this request - that reconnect attempt races
+                    # against our shutdown and is what produces BlueZ's
+                    # "Operation already in progress" / "br-connection-canceled"
+                    # errors. We manage the connect/disconnect lifecycle
+                    # ourselves once per request, so auto-reconnect is unwanted.
+                    madoka.connection.client = lib["BleakClient"](
+                        matched,
+                        adapter=device.adapter,
+                        disconnected_callback=lambda _client: None,
+                    )
+                await asyncio.wait_for(
+                    madoka.start(), timeout=self._connect_timeout
+                )
                 return await action(madoka, lib)
             finally:
+                client = madoka.connection.client
                 try:
                     await asyncio.wait_for(madoka.stop(), timeout=self._connect_timeout)
                 except Exception:
-                    # A stuck/failed disconnect shouldn't clobber a result
-                    # action() already produced successfully - the command
-                    # reached the device either way, and _ble_lock is what
-                    # actually protects the next request from colliding.
-                    pass
+                    # cleanup() calls stop_notify() before disconnect(). If
+                    # stop_notify() fails, pymadoka never reaches disconnect
+                    # and every poll leaks a Bleak system-D-Bus connection.
+                    # Always make a direct disconnect attempt as a fallback.
+                    if client is not None:
+                        try:
+                            await asyncio.wait_for(
+                                client.disconnect(), timeout=self._connect_timeout
+                            )
+                        except Exception:
+                            # Bleak 0.20 has no public finalizer for a failed
+                            # disconnect. Its internal cleanup is the last-resort
+                            # path that closes its private D-Bus connection and
+                            # removes its BlueZ watcher.
+                            cleanup = getattr(client, "_cleanup_all", None)
+                            if cleanup is not None:
+                                try:
+                                    cleanup()
+                                except Exception:
+                                    pass
 
         try:
             result = asyncio.run(runner())
