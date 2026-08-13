@@ -93,18 +93,16 @@ WEATHER_POLL_MS = 900000
 FULL_REFRESH_EVERY = 20
 
 # How long the device light-sleeps between checks when idle, in milliseconds.
-# Touch wakes it immediately regardless of this value (confirmed: touch can
-# wake from light sleep on this board - see light_sleep_ms()), so this only
-# controls how stale the clock/steady-state weather poll can get while
-# untouched, not how responsive taps feel. Initial synchronization temporarily
-# uses INITIAL_SYNC_RETRY_MS instead. Deliberately long - the point of light
-# sleep is to actually stay asleep, not wake on a tight steady-state poll.
+# This is used only when ENABLE_LIGHT_SLEEP is explicitly enabled below.
 TICK_MS = 60000
 
-# UIFlow2 can leave the Wi-Fi station disconnected after light sleep. Re-run
-# the documented M5 initialization path after a wake so its saved Wi-Fi
-# profile reconnects before the next dashboard request.
-RECOVER_NETWORK_AFTER_SLEEP = True
+# Keep Wi-Fi awake by default. On this PaperS3, light sleep can drop the Wi-Fi
+# association, and running M5.begin() after wake resets the display black. The
+# panel is normally mains-powered, so a short ordinary idle wait is safer.
+# Set this True only after confirming the installed firmware reconnects Wi-Fi
+# after light sleep without any M5.begin() call.
+ENABLE_LIGHT_SLEEP = False
+AWAKE_IDLE_MS = 1000
 
 # Local clock is offset from whatever the device's NTP-synced RTC holds
 # (assumed UTC) by this many hours - adjust for your timezone/DST. UIFlow2
@@ -213,26 +211,20 @@ def is_charging():
 
 
 def light_sleep_ms(ms):
-    """Low-power idle wait, in place of a plain time.sleep_ms(). Confirmed via
-    official docs: light sleep (unlike deep sleep) can wake early on touch on
-    this board, since the touch interrupt isn't on an RTC-domain GPIO (deep
-    sleep needs one, light sleep doesn't - CPU/RAM stay powered). Falls back
-    to a plain sleep if this raises (e.g. unsupported in some state) so a
-    sleep-mode edge case can't crash the whole app.
+    """Idle without taking the radio down by default.
 
-    NOT verified whether it actually wakes early on touch versus always
-    sleeping the full duration - worth checking with DEBUG=True: if touch
-    still feels responsive, it's working; if taps feel like they wait up to
-    TICK_MS before registering, it isn't, and TICK_MS is the fallback bound
-    either way rather than something to raise blindly."""
+    M5.begin() is a boot-time display initialization, not a Wi-Fi reconnect
+    primitive: calling it after light sleep blackens this panel. The default
+    short awake wait preserves both the display and the Wi-Fi association.
+    """
+    if not ENABLE_LIGHT_SLEEP:
+        time.sleep_ms(min(ms, AWAKE_IDLE_MS))
+        return
     try:
         M5.Power.lightSleep(ms * 1000, True)
-        if RECOVER_NETWORK_AFTER_SLEEP:
-            M5.begin()
-            Lcd.setEpdMode(EPD_FASTEST)
     except Exception as exc:
         log("light_sleep_ms(%d) failed: %s - falling back to time.sleep_ms" % (ms, exc))
-        time.sleep_ms(ms)
+        time.sleep_ms(min(ms, AWAKE_IDLE_MS))
 
 
 # ============================================================

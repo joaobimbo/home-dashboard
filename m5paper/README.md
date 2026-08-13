@@ -233,30 +233,23 @@ pre-action hit region (e.g. a stale "turn on" region after the AC had already
 turned on). `_replace_hit_regions()` fixes this and every scoped redraw goes
 through it.
 
-## Battery indicator + light sleep
+## Battery indicator + idle behaviour
 
 Header now shows battery % (top-right), with a `+` suffix while charging -
 `M5.Power.getBatteryLevel()` / `M5.Power.isCharging()`, confirmed via the
 official UIFlow2 Power docs.
 
-**On sleep specifically - a real hardware limitation, not a design choice:**
-touch can only wake this board from *light* sleep, not deep sleep - the touch
-controller's interrupt line isn't wired to an RTC-domain GPIO, which deep
-sleep requires (light sleep doesn't, since CPU/RAM stay powered). There are
-also documented community reports of deep sleep on battery-only power simply
-failing to wake at all (touch *or* timer), which would mean a dead panel
-requiring a physical reset. Given that, this uses light sleep only:
-`light_sleep_ms()` wraps `M5.Power.lightSleep(ms * 1000, True)` in place of
-the idle loop's `time.sleep_ms()`, with a plain-`sleep_ms` fallback if it ever
-raises. State is preserved across light sleep (unlike deep sleep, which
-restarts the whole script), so this doesn't change any other behavior.
+The panel **stays awake by default**. On this PaperS3/UIFlow2 setup, light
+sleep can drop the Wi-Fi association; calling `M5.begin()` after wake to try to
+recover it reinitializes the display and can leave it black. Keeping the radio
+awake is therefore the reliable setting for a wall/mains-powered dashboard.
+The idle loop uses a normal 1-second wait (`AWAKE_IDLE_MS`), preserving both
+the server connection and responsive touch.
 
-Some devices lose their Wi-Fi association during light sleep. After every wake,
-the app now re-runs the confirmed `M5.begin()` initialization path and restores
-the fast e-paper mode before the next HTTP call. This is controlled by
-`RECOVER_NETWORK_AFTER_SLEEP` (enabled by default). If a firmware revision
-proves incompatible, set it to `False` temporarily and capture a `DEBUG=True`
-serial log instead of assuming a device endpoint is at fault.
+For battery experiments only, set `ENABLE_LIGHT_SLEEP = True` in
+`hdashboard.py`. That uses `M5.Power.lightSleep(...)`, but only enable it if
+your firmware demonstrably reconnects to Wi-Fi after every wake. The app never
+calls `M5.begin()` after wake.
 
 ## Spotify controls
 
@@ -268,21 +261,9 @@ starting a separate stream. A receiver only appears while Spotify reports it
 as available, so Raspotify/librespot, Echo, or Google speakers may be absent
 while offline.
 
-`TICK_MS` (the light-sleep duration) is **60 seconds**, not 100ms — the
-point of light sleep is to actually stay asleep between touches, not wake up
-on a tight poll. Touch wakes it immediately regardless of this value
-(confirmed: touch can wake light sleep on this board), so 60s only bounds how
-stale the clock/weather/boot-recovery-retry can get while genuinely
-untouched — it has no effect on tap responsiveness. `CLOCK_CHECK_MS` (a
-separate, smaller polling interval that used to gate the clock/minute check)
-was removed as redundant once `TICK_MS` alone is larger than it was — the
-clock is now just checked every loop iteration, which itself only happens
-once per `TICK_MS` or right after a touch.
-
-**Not verified: whether it actually wakes early on touch, or always sleeps
-the full 60s before the next check.** No correctness risk either way — just
-check with `DEBUG = True` whether taps still feel instant after a long idle
-period. If they do, wake-on-touch is confirmed working.
+With the default awake idle mode, `AWAKE_IDLE_MS` is **1 second**. This is a
+small power trade-off for stable Wi-Fi. `TICK_MS` remains the 60-second
+light-sleep duration if you explicitly enable that experimental battery mode.
 
 ## Clock timezone
 
