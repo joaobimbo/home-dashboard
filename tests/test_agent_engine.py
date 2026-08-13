@@ -9,10 +9,20 @@ from modules.agent.store import AutomationStore
 class FakeDashboard:
     def __init__(self):
         self.actions = []
+        self.snapshot_calls = 0
+        self.weather_calls = 0
 
     def execute(self, action):
         self.actions.append(action)
         return {"ok": True}
+
+    def snapshot(self, include_weather=True):
+        self.snapshot_calls += 1
+        return {"devices": {}, "weather": None}
+
+    def weather(self):
+        self.weather_calls += 1
+        return None
 
 
 def event_rule():
@@ -99,6 +109,20 @@ class EngineTests(unittest.TestCase):
         self.engine.tick(self.start + timedelta(seconds=10), self.snapshot("off"))
         self.store.set_enabled(self.rule["id"], False, 10)
         self.assertFalse(self.store.get_state()["runs"])
+
+    def test_idle_engine_does_not_poll_dashboard(self):
+        self.store.set_enabled(self.rule["id"], False, 10)
+
+        self.engine.tick(self.start)
+
+        self.assertEqual(self.client.snapshot_calls, 0)
+        self.assertEqual(self.client.weather_calls, 0)
+
+    def test_enabled_automation_polls_immediately(self):
+        self.engine.tick(self.start)
+
+        self.assertEqual(self.client.snapshot_calls, 1)
+        self.assertEqual(self.client.weather_calls, 1)
 
     def test_recovered_overdue_run_rechecks_conditions(self):
         rule = self.store.get_rule(self.rule["id"])

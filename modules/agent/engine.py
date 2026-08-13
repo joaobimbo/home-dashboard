@@ -62,9 +62,14 @@ class AutomationEngine:
     ):
         current = now or datetime.now(timezone.utc)
         monotonic_now = time.monotonic()
+        rules = {
+            rule["id"]: rule
+            for rule in self.store.list_rules()
+            if rule.get("enabled")
+        }
         if snapshot is not None:
             self._snapshot = snapshot
-        else:
+        elif rules:
             if monotonic_now - self._last_device_poll >= self.device_poll_seconds:
                 fresh = self.client.snapshot(include_weather=False)
                 self._snapshot["devices"] = fresh.get("devices", {})
@@ -72,11 +77,17 @@ class AutomationEngine:
             if monotonic_now - self._last_weather_poll >= self.weather_poll_seconds:
                 self._snapshot["weather"] = self.client.weather()
                 self._last_weather_poll = monotonic_now
+        else:
+            # An idle Telegram agent does not need device or weather state.
+            # Reset the poll clocks so enabling a rule fetches a fresh
+            # baseline immediately instead of waiting for the next interval.
+            self._snapshot = {"devices": {}, "weather": None}
+            self._last_device_poll = 0.0
+            self._last_weather_poll = 0.0
 
         state = self.store.get_state()
         state.setdefault("last_triggered", {})
         changed = False
-        rules = {rule["id"]: rule for rule in self.store.list_rules() if rule.get("enabled")}
 
         for rule in rules.values():
             fired, observation = self._triggered(
