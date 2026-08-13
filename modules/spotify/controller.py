@@ -136,8 +136,9 @@ class SpotifyController:
         result = self._api("GET", "/search", params={"q": query.strip(), "type": "playlist", "limit": 1})
         if not result["ok"]: return result
         items = result["data"].get("playlists", {}).get("items", [])
-        if not items or not items[0].get("uri"): return {"ok": False, "error": "Spotify could not find that playlist"}
-        return self.play_uri(items[0]["uri"], device_id)
+        playlist = next((item for item in items if isinstance(item, dict) and item.get("uri")), None)
+        if not playlist: return {"ok": False, "error": "Spotify could not find an available playlist with that name"}
+        return self.play_uri(playlist["uri"], device_id)
 
     def search(self, query):
         if not isinstance(query, str) or not query.strip(): return {"ok": False, "error": "Enter something to search for"}

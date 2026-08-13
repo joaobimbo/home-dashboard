@@ -21,3 +21,7 @@ class SpotifyTests(unittest.TestCase):
   data={'tracks':{'items':[{'name':'So What','uri':'spotify:track:1','artists':[{'name':'Miles Davis'}],'album':{'name':'Kind of Blue','images':[{'url':'cover'}]}}]},'albums':{'items':[]},'playlists':{'items':[]}}
   with mock.patch('modules.spotify.controller.requests.request',return_value=Response(200,data)): result=self.c.search('so what')
   self.assertEqual(result['results'][0]['uri'],'spotify:track:1')
+ def test_playlist_query_ignores_null_search_items(self):
+  data={'playlists':{'items':[None]}}
+  with mock.patch('modules.spotify.controller.requests.request',return_value=Response(200,data)): result=self.c.play_playlist_query('upbeat','device')
+  self.assertFalse(result['ok'])

@@ -80,12 +80,16 @@ def spotify_search(): return jsonify(spotify.search(request.args.get('q','')))
 @app.route('/api/spotify/<command>',methods=['POST'])
 def spotify_command(command):
     payload=request.get_json(silent=True) or {}
-    if command in {'play','pause','next','previous'}: return jsonify(spotify.command(command,payload))
-    if command=='device': return jsonify(spotify.transfer(payload.get('device_id')))
-    if command=='volume': return jsonify(spotify.volume(payload.get('volume'),payload.get('device_id')))
-    if command=='play-uri': return jsonify(spotify.play_uri(payload.get('uri'),payload.get('device_id')))
-    if command=='play-playlist': return jsonify(spotify.play_playlist_query(payload.get('query'),payload.get('device_id')))
-    return jsonify({'ok':False,'error':'Invalid Spotify command'}),404
+    try:
+        if command in {'play','pause','next','previous'}: return jsonify(spotify.command(command,payload))
+        if command=='device': return jsonify(spotify.transfer(payload.get('device_id')))
+        if command=='volume': return jsonify(spotify.volume(payload.get('volume'),payload.get('device_id')))
+        if command=='play-uri': return jsonify(spotify.play_uri(payload.get('uri'),payload.get('device_id')))
+        if command=='play-playlist': return jsonify(spotify.play_playlist_query(payload.get('query'),payload.get('device_id')))
+        return jsonify({'ok':False,'error':'Invalid Spotify command'}),404
+    except Exception:
+        app.logger.exception("spotify_command_failed command=%s", command)
+        return jsonify({'ok':False,'error':'Spotify command failed; check dashboard logs'}),500
 
 
 def _web_agent_browser_id():
