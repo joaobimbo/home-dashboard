@@ -29,10 +29,10 @@
 
       {% set covers_devices = devices | selectattr('component', 'equalto', 'cover') | list %}
       {% set lights_devices = devices | rejectattr('component', 'equalto', 'cover') | list %}
-      {% if daikin_devices %}
-        {% set default_category = 'ac' %}
-      {% elif lights_devices %}
+      {% if lights_devices %}
         {% set default_category = 'lights' %}
+      {% elif daikin_devices %}
+        {% set default_category = 'ac' %}
       {% elif covers_devices %}
         {% set default_category = 'covers' %}
       {% else %}
@@ -82,11 +82,11 @@
           </div>
 
           <div class="category-tabs" role="tablist" aria-label="Categorias">
-            {% if daikin_devices %}
-            <button type="button" class="category-tab{% if default_category == 'ac' %} is-active{% endif %}" data-category-tab="ac" role="tab" aria-selected="{% if default_category == 'ac' %}true{% else %}false{% endif %}">AC</button>
-            {% endif %}
             {% if lights_devices %}
             <button type="button" class="category-tab{% if default_category == 'lights' %} is-active{% endif %}" data-category-tab="lights" role="tab" aria-selected="{% if default_category == 'lights' %}true{% else %}false{% endif %}">Luzes</button>
+            {% endif %}
+            {% if daikin_devices %}
+            <button type="button" class="category-tab{% if default_category == 'ac' %} is-active{% endif %}" data-category-tab="ac" role="tab" aria-selected="{% if default_category == 'ac' %}true{% else %}false{% endif %}">AC</button>
             {% endif %}
             {% if covers_devices %}
             <button type="button" class="category-tab{% if default_category == 'covers' %} is-active{% endif %}" data-category-tab="covers" role="tab" aria-selected="{% if default_category == 'covers' %}true{% else %}false{% endif %}">Estores</button>

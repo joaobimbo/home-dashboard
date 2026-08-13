@@ -112,6 +112,15 @@ class DaikinController:
         # browser tabs under the threaded Flask server) must be serialized
         # here instead of racing each other.
         self._ble_lock = threading.Lock()
+        # Bleak's BlueZ backend keeps a process-global D-Bus manager tied to
+        # the asyncio loop that first used it. Creating a fresh loop with
+        # asyncio.run() for every request eventually leaves that manager bound
+        # to a closed loop/D-Bus connection. All BLE work is therefore sent to
+        # one long-lived loop running in its own daemon thread. It is started
+        # lazily so loading configuration alone (pair/debug scripts) does not
+        # create an otherwise unused thread.
+        self._ble_loop = None
+        self._ble_loop_thread = None
         # Shared last-known-status cache, kept fresh by a single background
         # poller plus every action's own result, so browser tabs read cheap
         # in-memory state instead of each tab triggering its own BLE cycle.
@@ -319,6 +328,23 @@ class DaikinController:
             "fan_speed": str(fan.cooling_fan_speed).lower(),
         }
 
+    def _ensure_ble_loop(self):
+        if self._ble_loop_thread is not None and self._ble_loop_thread.is_alive():
+            return
+
+        loop_ready = threading.Event()
+
+        def run_loop():
+            self._ble_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self._ble_loop)
+            loop_ready.set()
+            self._ble_loop.run_forever()
+
+        self._ble_loop_thread = threading.Thread(target=run_loop, daemon=True)
+        self._ble_loop_thread.start()
+        if not loop_ready.wait(timeout=5.0):
+            raise DaikinControllerError("Could not start the Daikin BLE event loop")
+
     def _run(self, device: DaikinDevice, action):
         try:
             lib = _load_pymadoka()
@@ -332,6 +358,8 @@ class DaikinController:
                 "name": device.name,
                 "error": "Daikin control is busy with another request, try again shortly",
             }
+
+        self._ensure_ble_loop()
 
         async def runner():
             await lib["force_device_disconnect"](device.address)
@@ -414,7 +442,8 @@ class DaikinController:
                                     pass
 
         try:
-            result = asyncio.run(runner())
+            future = asyncio.run_coroutine_threadsafe(runner(), self._ble_loop)
+            result = future.result()
             result["id"] = device.id
             result["name"] = device.name
             if result.get("ok"):
