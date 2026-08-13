@@ -102,7 +102,9 @@ TICK_MS = 60000
 # Set this True only after confirming the installed firmware reconnects Wi-Fi
 # after light sleep without any M5.begin() call.
 ENABLE_LIGHT_SLEEP = False
-AWAKE_IDLE_MS = 1000
+# Normal idle mode must poll touch frequently because it has no hardware wake
+# interrupt. 50ms feels immediate while leaving almost all CPU time idle.
+AWAKE_IDLE_MS = 50
 
 # Local clock is offset from whatever the device's NTP-synced RTC holds
 # (assumed UTC) by this many hours - adjust for your timezone/DST. UIFlow2
@@ -1480,10 +1482,8 @@ def loop():
     global last_weather, last_displayed_minute
     global last_shelly_retry, last_daikin_retry
 
-    # Primary loop: touch. light_sleep_ms() below wakes immediately on touch
-    # regardless of how long it's set to, so this poll only actually runs
-    # right after such a wake (or after TICK_MS if nothing touched it) - not
-    # every 100ms.
+    # Primary loop: touch. With the default awake idle mode this runs every
+    # AWAKE_IDLE_MS, so taps do not wait for the clock/weather cadence.
     touch = poll_touch()
     if touch:
         log("loop(): touch at %s" % (touch,))
@@ -1493,8 +1493,9 @@ def loop():
         time.sleep_ms(200)  # debounce: ignore rapid repeat taps
         return  # prioritize the next touch poll over ambient checks below
 
-    # Ambient: clock/weather/boot-recovery. The device sleeps between
-    # iterations: 5s while initial data is still missing, then 60s normally.
+    # Ambient: clock/weather/boot-recovery. The requested idle duration is 5s
+    # while initial data is missing and 60s normally; awake mode caps the
+    # actual wait at AWAKE_IDLE_MS to keep touch responsive.
     now = time.ticks_ms()
 
     current_minute = _current_minute()
@@ -1544,9 +1545,8 @@ def loop():
         or not app.daikin_loaded
         or not app.weather_loaded
     )
-    log("loop: sleeping %dms (initial_sync_pending=%s)" % (
-        INITIAL_SYNC_RETRY_MS if initial_sync_pending else TICK_MS,
-        initial_sync_pending))
+    # Do not log this hot path. With DEBUG=True, a line per short idle wait can
+    # fill the USB serial buffer and make the whole UI appear frozen.
     light_sleep_ms(INITIAL_SYNC_RETRY_MS if initial_sync_pending else TICK_MS)
 
 

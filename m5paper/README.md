@@ -243,7 +243,7 @@ The panel **stays awake by default**. On this PaperS3/UIFlow2 setup, light
 sleep can drop the Wi-Fi association; calling `M5.begin()` after wake to try to
 recover it reinitializes the display and can leave it black. Keeping the radio
 awake is therefore the reliable setting for a wall/mains-powered dashboard.
-The idle loop uses a normal 1-second wait (`AWAKE_IDLE_MS`), preserving both
+The idle loop uses a normal 50ms wait (`AWAKE_IDLE_MS`), preserving both
 the server connection and responsive touch.
 
 For battery experiments only, set `ENABLE_LIGHT_SLEEP = True` in
@@ -261,7 +261,7 @@ starting a separate stream. A receiver only appears while Spotify reports it
 as available, so Raspotify/librespot, Echo, or Google speakers may be absent
 while offline.
 
-With the default awake idle mode, `AWAKE_IDLE_MS` is **1 second**. This is a
+With the default awake idle mode, `AWAKE_IDLE_MS` is **50ms**. This is a
 small power trade-off for stable Wi-Fi. `TICK_MS` remains the 60-second
 light-sleep duration if you explicitly enable that experimental battery mode.
 
