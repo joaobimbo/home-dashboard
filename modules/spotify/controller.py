@@ -94,6 +94,11 @@ class SpotifyController:
                 return {"ok": False, "error": "No active Spotify speaker. Choose an output, then try again."}
         if response.status_code >= 400:
             return {"ok": False, "error": "Spotify request failed (" + str(response.status_code) + ")"}
+        # Spotify playback mutations intentionally return 204 No Content.
+        # Some HTTP clients expose whitespace in their body for a 204, so do
+        # not infer JSON availability from response.content for this status.
+        if response.status_code == 204:
+            return {"ok": True, "data": {}}
         try:
             return {"ok": True, "data": response.json() if response.content else {}}
         except ValueError:
