@@ -8,6 +8,7 @@ from modules.shelly import SceneStore, ShellyController
 from modules.daikin import DaikinController
 from modules.weather import get_weather
 from modules.agent.web import AgentBridgeClient, AgentBridgeError
+from modules.spotify import SpotifyController
 
 
 # The dashboard and automation agent poll several read-only endpoints. Keep
@@ -21,6 +22,7 @@ scene_store = SceneStore()
 daikin_controller = DaikinController.from_sources()
 daikin_controller.start_background_polling()
 web_agent = AgentBridgeClient(os.environ.get("AGENT_WEB_URL", "http://127.0.0.1:5001"))
+spotify = SpotifyController()
 
 
 @app.route("/")
@@ -56,6 +58,27 @@ def weather():
     result = get_weather()
     status_code = 200 if result.get("ok") else 400
     return jsonify(result), status_code
+
+@app.route('/api/spotify/auth/status')
+def spotify_auth_status(): return jsonify(spotify.auth_status())
+@app.route('/api/spotify/login')
+def spotify_login():
+    from flask import redirect
+    if not spotify.configured: return jsonify({'ok':False,'error':'Spotify is not configured'}),503
+    return redirect(spotify.login_url())
+@app.route('/api/spotify/callback')
+def spotify_callback():
+    from flask import redirect
+    spotify.callback(request.args.get('code',''),request.args.get('state',''))
+    return redirect('/')
+@app.route('/api/spotify/status')
+def spotify_status(): return jsonify(spotify.status())
+@app.route('/api/spotify/devices')
+def spotify_devices(): return jsonify(spotify.devices())
+@app.route('/api/spotify/<command>',methods=['POST'])
+def spotify_command(command):
+    if command not in {'play','pause','next','previous'}: return jsonify({'ok':False,'error':'Invalid Spotify command'}),404
+    return jsonify(spotify.command(command,request.get_json(silent=True) or {}))
 
 
 def _web_agent_browser_id():
