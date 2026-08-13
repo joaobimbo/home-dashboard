@@ -64,6 +64,14 @@ class DashboardClient:
         except DashboardError:
             spotify = None
         if isinstance(spotify, dict) and spotify.get("ok"):
+            result.append(
+                {
+                    "token": "P0", "id": "current-playback", "kind": "spotify",
+                    "component": "playback", "display_name": "Spotify playback",
+                    "other_names": [], "room": "Casa",
+                    "capabilities": ["spotify_pause", "spotify_next", "spotify_previous"],
+                }
+            )
             for index, device in enumerate(spotify.get("devices", []), 1):
                 if not isinstance(device, dict) or not device.get("id"):
                     continue
@@ -176,11 +184,11 @@ class DashboardClient:
             if operation == "spotify_play_playlist":
                 return self._post("/api/spotify/play-playlist", {"query": params["query"], "device_id": device_id}, timeout=15)
             if operation == "spotify_pause":
-                return self._post("/api/spotify/pause", {"device_id": device_id}, timeout=15)
+                return self._post("/api/spotify/pause", {}, timeout=15)
             if operation == "spotify_next":
-                return self._post("/api/spotify/next", {"device_id": device_id}, timeout=15)
+                return self._post("/api/spotify/next", {}, timeout=15)
             if operation == "spotify_previous":
-                return self._post("/api/spotify/previous", {"device_id": device_id}, timeout=15)
+                return self._post("/api/spotify/previous", {}, timeout=15)
             if operation == "ac_mode":
                 return self._post(
                     f"/api/daikin/{device_id}/mode",

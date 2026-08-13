@@ -62,6 +62,18 @@ class DashboardClientTests(unittest.TestCase):
                 }
             )
 
+    def test_spotify_pause_omits_output_device(self):
+        client = FakeClient()
+        client.execute(
+            {
+                "device_id": "current-playback",
+                "device_kind": "spotify",
+                "operation": "spotify_pause",
+                "parameters": {},
+            }
+        )
+        self.assertEqual(client.posts[0], ("/api/spotify/pause", {}, 15))
+
 
 if __name__ == "__main__":
     unittest.main()
