@@ -3,6 +3,7 @@ import unittest
 from modules.agent.validation import (
     PlanValidationError,
     validate_action,
+    validate_expression,
     validate_interpretation,
 )
 
@@ -35,6 +36,14 @@ CATALOG = [
         "component": "ac",
         "display_name": "AC Escritorio",
         "capabilities": ["status", "power", "ac_mode", "ac_setpoint", "ac_fan"],
+    },
+    {
+        "token": "S2",
+        "id": "bedroom-cover",
+        "kind": "shelly",
+        "component": "cover",
+        "display_name": "Estores Quarto",
+        "capabilities": ["status", "cover", "position"],
     },
 ]
 
@@ -202,6 +211,68 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(result["automation"]["repeat"], "once")
         self.assertEqual(result["automation"]["overlap"], "ignore")
 
+    def test_validates_daily_clock_schedule_for_cover(self):
+        raw = {
+            "kind": "automation",
+            "automation": {
+                "name": "Open bedroom blinds at seven",
+                "description": "Open the bedroom blinds every day at 07:00",
+                "trigger": {
+                    "source": "schedule",
+                    "field": "local_time",
+                    "operator": "daily",
+                    "value": None,
+                    "second_value": None,
+                    "at": "07:00",
+                    "weekdays": [],
+                },
+                "conditions": [],
+                "cancel_conditions": [],
+                "steps": [
+                    {
+                        "kind": "action",
+                        "action": {
+                            "device": "S2",
+                            "operation": "cover",
+                            "parameters": {"command": "open"},
+                        },
+                    }
+                ],
+                "repeat": "reusable",
+                "overlap": "ignore",
+            },
+        }
+
+        result = validate_interpretation(raw, CATALOG)["automation"]
+
+        self.assertEqual(result["trigger"]["at"], "07:00")
+        self.assertEqual(result["steps"][0]["action"]["device_id"], "bedroom-cover")
+
+    def test_validates_clock_comparison_conditions(self):
+        for operator in ("eq", "ne", "gt", "gte", "lt", "lte"):
+            result = validate_expression(
+                {
+                    "source": "time",
+                    "field": "local_time",
+                    "operator": operator,
+                    "value": "07:00",
+                    "second_value": None,
+                },
+                CATALOG,
+            )
+            self.assertEqual(result["operator"], operator)
+
+        with self.assertRaisesRegex(PlanValidationError, "Invalid time value"):
+            validate_expression(
+                {
+                    "source": "time",
+                    "field": "local_time",
+                    "operator": "gte",
+                    "value": "25:00",
+                },
+                CATALOG,
+            )
+
     def test_rejects_time_window_as_trigger(self):
         raw = {
             "kind": "automation",
@@ -228,7 +299,7 @@ class ValidationTests(unittest.TestCase):
                 "overlap": "ignore",
             },
         }
-        with self.assertRaisesRegex(PlanValidationError, "Time windows are conditions"):
+        with self.assertRaisesRegex(PlanValidationError, "Clock comparisons are conditions"):
             validate_interpretation(raw, CATALOG)
 
 

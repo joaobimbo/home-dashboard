@@ -138,3 +138,10 @@ countdown starts when the user confirms and the rule is saved; subsequent waits
 are persisted in `state.json`, so sequences continue across service restarts.
 Re-enabling a completed or disabled relative rule clears its previous fired slot
 and restarts the countdown from the time it is enabled.
+
+Clock schedules use the timezone configured by `AGENT_TIMEZONE` (default
+`Europe/Lisbon`). Requests can create one-time, daily, or weekly rules, for
+example "open the bedroom blinds every day at 7am". Clock conditions can also
+restrict another trigger with equal, before/after, or between comparisons. The
+agent receives the current local date and time when interpreting requests, and
+the confirmation preview shows the exact schedule and timezone before saving.

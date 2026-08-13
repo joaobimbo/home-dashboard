@@ -141,6 +141,45 @@ class TelegramRuleMenuTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("countdown restarted", message)
 
+    def test_clock_rule_preview_shows_time_conditions_and_timezone(self):
+        preview = self.agent._format_automation(
+            {
+                "name": "Morning blinds",
+                "description": "Open every morning",
+                "trigger": {
+                    "source": "schedule",
+                    "operator": "daily",
+                    "at": "07:00",
+                },
+                "conditions": [
+                    {
+                        "source": "time",
+                        "field": "local_time",
+                        "operator": "gte",
+                        "value": "07:00",
+                    }
+                ],
+                "cancel_conditions": [],
+                "repeat": "reusable",
+                "overlap": "ignore",
+                "steps": [
+                    {
+                        "kind": "action",
+                        "action": {
+                            "display_name": "Estores Quarto",
+                            "operation": "cover",
+                            "parameters": {"command": "open"},
+                        },
+                    }
+                ],
+            },
+            "Europe/Lisbon",
+        )
+
+        self.assertIn("Trigger: every day at 07:00", preview)
+        self.assertIn("Condition: local time is at or after 07:00", preview)
+        self.assertIn("Time zone: Europe/Lisbon", preview)
+
 
 class TelegramPowerMenuTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):

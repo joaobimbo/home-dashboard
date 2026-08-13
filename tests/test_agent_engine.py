@@ -189,6 +189,38 @@ class EngineTests(unittest.TestCase):
         )
         self.assertEqual(len(self.client.actions), 1)
 
+    def test_clock_conditions_compare_lisbon_local_time(self):
+        morning_only = [
+            {
+                "source": "time",
+                "field": "local_time",
+                "operator": "gte",
+                "value": "07:00",
+                "second_value": None,
+            },
+            {
+                "source": "time",
+                "field": "local_time",
+                "operator": "lt",
+                "value": "12:00",
+                "second_value": None,
+            },
+        ]
+
+        # Lisbon is UTC+1 in August: 06:30 UTC is 07:30 locally.
+        self.assertTrue(
+            self.engine._all_conditions(
+                morning_only,
+                datetime(2026, 8, 11, 6, 30, tzinfo=timezone.utc),
+            )
+        )
+        self.assertFalse(
+            self.engine._all_conditions(
+                morning_only,
+                datetime(2026, 8, 11, 12, 0, tzinfo=timezone.utc),
+            )
+        )
+
     def test_relative_schedule_runs_sequence_from_rule_creation(self):
         schedule = event_rule()
         schedule["name"] = "Office light pulse"

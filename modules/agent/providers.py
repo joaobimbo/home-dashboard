@@ -38,20 +38,26 @@ class LanguageProvider(ABC):
 
 
 class OpenAIProvider(LanguageProvider):
-    def __init__(self, api_key: str, model: str):
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        timezone_name: str = "Europe/Lisbon",
+    ):
         try:
             from openai import OpenAI
         except ImportError as exc:
             raise ProviderError("The openai package is not installed") from exc
         self.client = OpenAI(api_key=api_key, timeout=60.0, max_retries=1)
         self.model = model
+        self.timezone_name = timezone_name
 
     def interpret(self, message, catalog, safety_identifier):
         try:
             response = self.client.responses.create(
                 model=self.model,
                 instructions=SYSTEM_PROMPT,
-                input=build_user_prompt(message, catalog),
+                input=build_user_prompt(message, catalog, self.timezone_name),
                 text={
                     "format": {
                         "type": "json_schema",
@@ -71,13 +77,19 @@ class OpenAIProvider(LanguageProvider):
 
 
 class AnthropicProvider(LanguageProvider):
-    def __init__(self, api_key: str, model: str):
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        timezone_name: str = "Europe/Lisbon",
+    ):
         try:
             from anthropic import Anthropic
         except ImportError as exc:
             raise ProviderError("The anthropic package is not installed") from exc
         self.client = Anthropic(api_key=api_key, timeout=60.0, max_retries=1)
         self.model = model
+        self.timezone_name = timezone_name
 
     def interpret(self, message, catalog, safety_identifier):
         del safety_identifier
@@ -86,7 +98,14 @@ class AnthropicProvider(LanguageProvider):
                 model=self.model,
                 max_tokens=4096,
                 system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": build_user_prompt(message, catalog)}],
+                messages=[
+                    {
+                        "role": "user",
+                        "content": build_user_prompt(
+                            message, catalog, self.timezone_name
+                        ),
+                    }
+                ],
                 output_config={
                     "format": {
                         "type": "json_schema",
@@ -109,20 +128,26 @@ class AnthropicProvider(LanguageProvider):
 
 
 class GeminiProvider(LanguageProvider):
-    def __init__(self, api_key: str, model: str):
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        timezone_name: str = "Europe/Lisbon",
+    ):
         try:
             from google import genai
         except ImportError as exc:
             raise ProviderError("The google-genai package is not installed") from exc
         self.client = genai.Client(api_key=api_key)
         self.model = model
+        self.timezone_name = timezone_name
 
     def interpret(self, message, catalog, safety_identifier):
         del safety_identifier
         try:
             response = self.client.interactions.create(
                 model=self.model,
-                input=build_gemini_prompt(message, catalog),
+                input=build_gemini_prompt(message, catalog, self.timezone_name),
                 response_format={
                     "type": "text",
                     "mime_type": "application/json",
@@ -136,12 +161,17 @@ class GeminiProvider(LanguageProvider):
             raise ProviderError(f"Gemini request failed: {exc}") from exc
 
 
-def create_provider(name: str, model: str, api_key: str) -> LanguageProvider:
+def create_provider(
+    name: str,
+    model: str,
+    api_key: str,
+    timezone_name: str = "Europe/Lisbon",
+) -> LanguageProvider:
     normalized = name.strip().lower()
     if normalized == "openai":
-        return OpenAIProvider(api_key, model)
+        return OpenAIProvider(api_key, model, timezone_name)
     if normalized in {"anthropic", "claude"}:
-        return AnthropicProvider(api_key, model)
+        return AnthropicProvider(api_key, model, timezone_name)
     if normalized in {"google", "gemini"}:
-        return GeminiProvider(api_key, model)
+        return GeminiProvider(api_key, model, timezone_name)
     raise ProviderError(f"Unknown LLM provider: {name}")

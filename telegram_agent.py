@@ -33,7 +33,12 @@ def main():
     )
     client = DashboardClient(settings.dashboard_url)
     store = AutomationStore(settings.data_dir)
-    provider = create_provider(settings.provider, settings.model, settings.api_key)
+    provider = create_provider(
+        settings.provider,
+        settings.model,
+        settings.api_key,
+        settings.timezone_name,
+    )
     TelegramAgent(
         token=settings.telegram_token,
         allowed_chat_ids=settings.allowed_chat_ids,

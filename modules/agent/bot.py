@@ -539,7 +539,10 @@ class TelegramAgent:
             if existing:
                 payload["replace_rule_id"] = existing["id"]
             token = self._new_pending("save", update, payload)
-            preview = self._format_automation(automation)
+            preview = self._format_automation(
+                automation,
+                getattr(self.engine.timezone, "key", str(self.engine.timezone)),
+            )
             if assumptions:
                 preview += "\nAssumptions: " + "; ".join(assumptions)
             if existing:
@@ -977,16 +980,79 @@ class TelegramAgent:
         return f"{name}: " + (", ".join(fields) if fields else "ok")
 
     @staticmethod
-    def _format_automation(rule: Dict[str, object]) -> str:
+    def _format_expression(expression: Dict[str, object]) -> str:
+        source = expression.get("source")
+        operator = expression.get("operator")
+        if source == "schedule":
+            at = expression.get("at")
+            if operator == "after":
+                return f"{expression.get('value')} seconds after confirmation"
+            if operator == "once":
+                return f"once at {at}"
+            if operator == "daily":
+                return f"every day at {at}"
+            if operator == "weekly":
+                weekday_names = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+                days = ", ".join(
+                    weekday_names[int(day)] for day in expression.get("weekdays", [])
+                )
+                return f"every {days} at {at}"
+        if source == "time":
+            if operator == "between":
+                return (
+                    f"local time between {expression.get('value')} and "
+                    f"{expression.get('second_value')}"
+                )
+            comparisons = {
+                "eq": "is",
+                "ne": "is not",
+                "gt": "is after",
+                "gte": "is at or after",
+                "lt": "is before",
+                "lte": "is at or before",
+            }
+            return (
+                f"local time {comparisons.get(operator, operator)} "
+                f"{expression.get('value')}"
+            )
+        label = expression.get("display_name") or source
+        if operator == "between":
+            return (
+                f"{label} {expression.get('field')} between "
+                f"{expression.get('value')} and {expression.get('second_value')}"
+            )
+        return (
+            f"{label} {expression.get('field')} {operator} "
+            f"{expression.get('value')}"
+        )
+
+    @staticmethod
+    def _format_automation(
+        rule: Dict[str, object],
+        timezone_name: str = "Europe/Lisbon",
+    ) -> str:
         trigger = rule["trigger"]
-        source = trigger.get("display_name") or trigger.get("source")
         lines = [
             f"Save automation: {rule['name']}",
             rule.get("description") or "",
-            f"Trigger: {source} {trigger['field']} {trigger['operator']} {trigger.get('value')}",
+            f"Trigger: {TelegramAgent._format_expression(trigger)}",
+        ]
+        clock_expressions = [trigger]
+        for condition in rule.get("conditions", []):
+            lines.append(f"Condition: {TelegramAgent._format_expression(condition)}")
+            clock_expressions.append(condition)
+        for condition in rule.get("cancel_conditions", []):
+            lines.append(f"Cancel if: {TelegramAgent._format_expression(condition)}")
+            clock_expressions.append(condition)
+        if any(
+            item.get("source") in {"schedule", "time"}
+            for item in clock_expressions
+        ):
+            lines.append(f"Time zone: {timezone_name}")
+        lines.extend([
             f"Repeat: {rule['repeat']}; overlap: {rule['overlap']}",
             "Steps:",
-        ]
+        ])
         for step in rule["steps"]:
             if step["kind"] == "wait":
                 lines.append(f"• wait {step['seconds']} seconds")

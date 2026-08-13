@@ -28,6 +28,8 @@ class ProviderTests(unittest.TestCase):
         self.assertFalse(kwargs["store"])
         self.assertEqual(kwargs["safety_identifier"], "safe-user")
         self.assertEqual(kwargs["text"]["format"]["type"], "json_schema")
+        self.assertIn("Current local date/time:", kwargs["input"])
+        self.assertIn("Europe/Lisbon", kwargs["input"])
 
     def test_anthropic_uses_structured_output(self):
         provider = AnthropicProvider("test", "test-model")
@@ -66,6 +68,8 @@ class ProviderTests(unittest.TestCase):
         self.assertIn("Luz Escritorio", kwargs["input"])
         self.assertIn("power(device,state=on|off)", kwargs["input"])
         self.assertIn("operator=after", kwargs["input"])
+        self.assertIn("Current local date/time:", kwargs["input"])
+        self.assertIn("every day at 7am", kwargs["input"])
         self.assertIn("green is\n[0,255,0]", kwargs["input"])
 
 

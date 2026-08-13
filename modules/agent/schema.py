@@ -1,7 +1,9 @@
 """Provider-neutral structured-output schema and prompt."""
 
 import json
+from datetime import datetime, timezone
 from typing import Dict, List
+from zoneinfo import ZoneInfo
 
 
 SCALAR_SCHEMA = {"type": ["string", "number", "boolean", "null"]}
@@ -207,8 +209,11 @@ Expression rules:
   number of seconds after the user confirms the rule
 - clock schedules use source=schedule, operator once/daily/weekly, and at as
   ISO-8601 local datetime for once or HH:MM for daily/weekly; Monday is weekday 0
-- time conditions use source=time, field=local_time, operator=between, with value
-  and second_value as HH:MM
+- use source=schedule (not source=time) for actions at a clock time; for example,
+  "open the blinds every day at 7am" is operator=daily with at=07:00
+- time conditions use source=time and field=local_time. Use eq/ne/gt/gte/lt/lte
+  with value as HH:MM, or between with value and second_value as HH:MM. These
+  restrict another trigger; they do not replace a clock schedule trigger
 - unused nullable fields must be null and unused weekday lists must be empty
 
 Action parameters not used by an operation must be null. Never use toggle in a
@@ -216,7 +221,20 @@ persistent automation. If the request asks for anything outside the catalog or
 home control, return unsupported without actions."""
 
 
-def build_user_prompt(message: str, catalog: List[Dict[str, object]]) -> str:
+def _clock_context(timezone_name: str) -> str:
+    local_now = datetime.now(timezone.utc).astimezone(ZoneInfo(timezone_name))
+    return (
+        "Current local date/time: "
+        + local_now.isoformat(timespec="minutes")
+        + f" ({timezone_name})"
+    )
+
+
+def build_user_prompt(
+    message: str,
+    catalog: List[Dict[str, object]],
+    timezone_name: str = "Europe/Lisbon",
+) -> str:
     safe_catalog = [
         {
             "token": item["token"],
@@ -230,14 +248,19 @@ def build_user_prompt(message: str, catalog: List[Dict[str, object]]) -> str:
         for item in catalog
     ]
     return (
-        "Current device catalog:\n"
+        _clock_context(timezone_name)
+        + "\nCurrent device catalog:\n"
         + json.dumps(safe_catalog, ensure_ascii=False, separators=(",", ":"))
         + "\n\nUser request:\n"
         + message
     )
 
 
-def build_gemini_prompt(message: str, catalog: List[Dict[str, object]]) -> str:
+def build_gemini_prompt(
+    message: str,
+    catalog: List[Dict[str, object]],
+    timezone_name: str = "Europe/Lisbon",
+) -> str:
     device_lines = []
     for item in catalog:
         aliases = ", ".join(str(value) for value in item.get("other_names", []))
@@ -253,7 +276,9 @@ def build_gemini_prompt(message: str, catalog: List[Dict[str, object]]) -> str:
             )
         )
 
-    return """Translate the request into calls using only these devices:
+    return """{clock}
+
+Translate the request into calls using only these devices:
 {devices}
 
 Available calls:
@@ -280,14 +305,18 @@ second_value, at, and weekdays. Device transitions use changes_to or
 changes_from_to. Relative requests such as "in 20 seconds" use a schedule
 trigger with operator=after and value=20; the countdown begins after confirmation.
 For "in 20 seconds turn it on, then 10 seconds later turn it off", use after=20
-then action-on, wait=10, action-off. Clock schedules use once/daily/weekly and at;
-time windows use between only as conditions, never as triggers. Steps are
+then action-on, wait=10, action-off. Actions at a clock time must use a schedule
+trigger: for example, "open the blinds every day at 7am" uses daily and at=07:00.
+Clock schedules use once/daily/weekly and at. Time conditions use source=time,
+field=local_time, and eq/ne/gt/gte/lt/lte/between; they are conditions, never
+triggers. Steps are
 {{"kind":"wait","seconds":1800}} or
 {{"kind":"action","action":<call object>}}. The only repeat values are exactly
 "once" and "reusable"; relative after rules must use "once". The only overlap
 values are exactly "ignore" and "restart". Never use toggle in a rule.
 
 User request: {message}""".format(
+        clock=_clock_context(timezone_name),
         devices="\n".join(device_lines),
         message=message,
     )

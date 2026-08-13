@@ -181,9 +181,15 @@ def validate_expression(
         if operator == "weekly":
             _require(bool(result["weekdays"]), "Weekly schedule requires weekdays")
     elif source == "time":
-        _require(not trigger, "Time windows are conditions, not triggers")
-        _require(result["field"] == "local_time" and operator == "between", "Invalid time condition")
-        _require(_valid_hhmm(str(result["value"])) and _valid_hhmm(str(result["second_value"])), "Invalid time window")
+        _require(not trigger, "Clock comparisons are conditions, not triggers")
+        _require(result["field"] == "local_time", "Invalid time field")
+        _require(operator in COMPARISON_OPERATORS, "Invalid time condition")
+        _require(_valid_hhmm(str(result["value"])), "Invalid time value")
+        if operator == "between":
+            _require(
+                _valid_hhmm(str(result["second_value"])),
+                "Invalid time window",
+            )
     else:
         raise PlanValidationError("Invalid expression source")
     return result
