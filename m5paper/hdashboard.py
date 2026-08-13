@@ -101,6 +101,11 @@ FULL_REFRESH_EVERY = 20
 # sleep is to actually stay asleep, not wake on a tight steady-state poll.
 TICK_MS = 60000
 
+# UIFlow2 can leave the Wi-Fi station disconnected after light sleep. Re-run
+# the documented M5 initialization path after a wake so its saved Wi-Fi
+# profile reconnects before the next dashboard request.
+RECOVER_NETWORK_AFTER_SLEEP = True
+
 # Local clock is offset from whatever the device's NTP-synced RTC holds
 # (assumed UTC) by this many hours - adjust for your timezone/DST. UIFlow2
 # syncs time at boot but doesn't appear to apply a local offset on its own.
@@ -222,6 +227,9 @@ def light_sleep_ms(ms):
     either way rather than something to raise blindly."""
     try:
         M5.Power.lightSleep(ms * 1000, True)
+        if RECOVER_NETWORK_AFTER_SLEEP:
+            M5.begin()
+            Lcd.setEpdMode(EPD_FASTEST)
     except Exception as exc:
         log("light_sleep_ms(%d) failed: %s - falling back to time.sleep_ms" % (ms, exc))
         time.sleep_ms(ms)
@@ -377,6 +385,26 @@ def get_weather():
     return _get("/api/weather")
 
 
+def get_spotify_auth_status():
+    return _get("/api/spotify/auth/status")
+
+
+def get_spotify_status():
+    return _get("/api/spotify/status")
+
+
+def get_spotify_devices():
+    return _get("/api/spotify/devices")
+
+
+def spotify_command(command):
+    return _post("/api/spotify/%s" % command, {})
+
+
+def spotify_transfer(device_id):
+    return _post("/api/spotify/device", {"device_id": device_id})
+
+
 # ============================================================
 # Shared tab identifiers
 # ============================================================
@@ -384,6 +412,7 @@ def get_weather():
 TAB_AC = "ac"
 TAB_LIGHTS = "lights"
 TAB_COVERS = "covers"
+TAB_MUSIC = "music"
 
 
 # ============================================================
@@ -410,6 +439,11 @@ class AppState:
         self.lights_accessible = None
         self.covers_accessible = None
         self.weather_accessible = None
+        self.spotify = None
+        self.spotify_accessible = None
+        self.spotify_configured = False
+        self.spotify_authenticated = False
+        self.spotify_devices = []
         self.active_tab = None
         self.active_modal = None   # None or {"type": ..., "device_id": ...}
         self.busy_ids = set()
@@ -430,6 +464,8 @@ class AppState:
 
     def available_tabs(self):
         tabs = []
+        if self.spotify_configured:
+            tabs.append(TAB_MUSIC)
         if self.daikin_devices:
             tabs.append(TAB_AC)
         if any(d.get("component") != "cover" for d in self.shelly_devices):
@@ -513,6 +549,26 @@ class AppState:
         self.weather_accessible = False
         return False
 
+    def refresh_spotify(self):
+        auth = get_spotify_auth_status()
+        if not auth.get("ok"):
+            self.spotify_accessible = False
+            return
+        self.spotify_configured = bool(auth.get("configured"))
+        self.spotify_authenticated = bool(auth.get("authenticated"))
+        if not self.spotify_configured or not self.spotify_authenticated:
+            self.spotify = None
+            self.spotify_accessible = self.spotify_configured
+            return
+        result = get_spotify_status()
+        if result.get("ok"):
+            self.spotify = result
+            self.spotify_accessible = True
+            devices = get_spotify_devices()
+            self.spotify_devices = devices.get("devices", []) if devices.get("ok") else []
+        else:
+            self.spotify_accessible = False
+
     # --- lookup (used for optimistic UI updates - see handle_action) --------
 
     def get_shelly_device(self, device_id):
@@ -583,7 +639,7 @@ class AppState:
 # Screen geometry and touch hit-testing. No hardware calls here - pure math.
 # ============================================================
 
-TAB_LABELS = {TAB_AC: "AC", TAB_LIGHTS: "Luzes", TAB_COVERS: "Estores"}
+TAB_LABELS = {TAB_MUSIC: "Musica", TAB_AC: "AC", TAB_LIGHTS: "Luzes", TAB_COVERS: "Estores"}
 
 HEADER_H = 70
 TABS_H = 60
@@ -723,6 +779,8 @@ def draw_tabs(app):
 
 
 def draw_body(app):
+    if app.active_tab == TAB_MUSIC:
+        return draw_spotify(app)
     if app.active_tab == TAB_AC:
         return draw_ac_list(app)
     if app.active_tab is None:
@@ -732,6 +790,44 @@ def draw_body(app):
         return []
     devices = app.devices_for_tab(app.active_tab)
     return draw_device_grid(app, devices)
+
+
+def draw_spotify(app):
+    x, y, w, h = body_rect()
+    regions = []
+    if not app.spotify_configured:
+        draw_text("Spotify nao configurado", x + 24, y + 40, size=2)
+        return regions
+    if not app.spotify_authenticated:
+        draw_text("Autorize Spotify no dashboard", x + 24, y + 40, size=2)
+        return regions
+    if not app.spotify_accessible:
+        draw_text("Spotify indisponivel", x + 24, y + 40, size=2)
+        return regions
+    status = app.spotify or {}
+    track = status.get("track")
+    device = status.get("device") or {}
+    if track:
+        draw_text(str(track.get("name") or "Spotify"), x + 24, y + 28, size=3)
+        artists = track.get("artists") or []
+        draw_text(", ".join(artists)[:42], x + 24, y + 62, size=2)
+        draw_text(str(track.get("album") or "")[:42], x + 24, y + 88, size=2)
+    else:
+        draw_text("Sem musica ativa", x + 24, y + 40, size=3)
+    draw_text("Em: " + str(device.get("name") or "--")[:38], x + 24, y + 122, size=2)
+    draw_rect(x + 20, y + 140, w - 40, 36, BLACK)
+    draw_text("Escolher altifalante", x + 34, _text_center_y(y + 140, 36, 2), size=2)
+    regions.append(((x + 20, y + 140, w - 40, 36), {"kind": "spotify_output"}))
+    button_y = y + 195
+    button_w = (w - 80) // 3
+    labels = ["Anterior", "Pausa" if status.get("is_playing") else "Tocar", "Seguinte"]
+    commands = ["previous", "pause" if status.get("is_playing") else "play", "next"]
+    for index in range(3):
+        bx = x + 20 + index * (button_w + 20)
+        draw_rect(bx, button_y, button_w, 64, BLACK)
+        draw_text(labels[index], bx + 12, _text_center_y(button_y, 64, 2), size=2)
+        regions.append(((bx, button_y, button_w, 64), {"kind": "spotify_command", "command": commands[index]}))
+    return regions
 
 
 def draw_device_grid(app, devices):
@@ -937,7 +1033,9 @@ def draw_modal(app):
     draw_rect(x, y, w, h, BLACK)
 
     kind = modal["type"]
-    if kind == "position" or kind == "brightness":
+    if kind == "spotify_device":
+        choices = app.spotify_devices[:5]
+    elif kind == "position" or kind == "brightness":
         choices = [0, 25, 50, 75, 100]
     elif kind == "setpoint":
         choices = [18, 20, 22, 24, 26]
@@ -952,10 +1050,13 @@ def draw_modal(app):
     btn_h = 50
     for i, choice in enumerate(choices):
         by = y + 40 + i * (btn_h + 10)
-        label = MODE_LABELS.get(choice, FAN_LABELS.get(choice, str(choice)))
+        if kind == "spotify_device":
+            label = ("* " if choice.get("is_active") else "  ") + str(choice.get("name") or "Spotify output")
+        else:
+            label = MODE_LABELS.get(choice, FAN_LABELS.get(choice, str(choice)))
         draw_rect(x + 20, by, w - 40, btn_h, BLACK)
         draw_text(label, x + 32, _text_center_y(by, btn_h, 3), size=3)
-        regions.append(((x + 20, by, w - 40, btn_h), {"kind": "modal_choice", "value": choice}))
+        regions.append(((x + 20, by, w - 40, btn_h), {"kind": "modal_choice", "value": choice.get("id") if kind == "spotify_device" else choice}))
 
     close_y = y + h - 50
     draw_rect(x + 20, close_y, w - 40, 40, BLACK)
@@ -1214,6 +1315,9 @@ def _apply_modal_choice(modal, value):
         app.patch_daikin_device(daikin_mode(device_id, value))
     elif kind == "fan":
         app.patch_daikin_device(daikin_fan(device_id, value))
+    elif kind == "spotify_device":
+        spotify_transfer(value)
+        app.refresh_spotify()
 
 
 def handle_action(action):
@@ -1228,7 +1332,9 @@ def handle_action(action):
         # Tab switch is the one moment we do fetch fresh device state - acts
         # as a manual "pull to refresh" too, since re-tapping the already
         # active tab still re-fetches it.
-        if app.active_tab == TAB_AC:
+        if app.active_tab == TAB_MUSIC:
+            app.refresh_spotify()
+        elif app.active_tab == TAB_AC:
             app.refresh_daikin()
         else:
             app.refresh_shelly()
@@ -1240,6 +1346,16 @@ def handle_action(action):
 
     elif kind == "open_modal":
         app.active_modal = {"type": action["type"], "device_id": action["device_id"]}
+        redraw()
+
+    elif kind == "spotify_output":
+        app.refresh_spotify()
+        app.active_modal = {"type": "spotify_device", "device_id": None}
+        redraw()
+
+    elif kind == "spotify_command":
+        spotify_command(action["command"])
+        app.refresh_spotify()
         redraw()
 
     elif kind == "page":
@@ -1352,6 +1468,9 @@ def setup():
     _run_setup_phase("weather refresh", app.refresh_weather)
     log("setup(): weather loaded=%s accessible=%s present=%s" % (
         app.weather_loaded, app.weather_accessible, app.weather is not None))
+
+    log("setup(): fetching Spotify")
+    _run_setup_phase("Spotify refresh", app.refresh_spotify)
 
     _run_setup_phase("choose active tab", app.ensure_active_tab)
     log("setup(): active_tab=%s available_tabs=%s" % (app.active_tab, app.available_tabs()))

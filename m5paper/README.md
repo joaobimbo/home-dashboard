@@ -1,10 +1,10 @@
 # M5PaperS3 dashboard panel
 
 A touch-control panel for the M5Stack PaperS3 (4.7" e-paper, capacitive touch,
-ESP32-S3) that mirrors the web dashboard: weather, and full touch control of
-lights, blinds, and AC. One file, `hdashboard.py` — no backend changes, nothing
-here talks to devices directly, it only calls the same Flask API
-(`/api/shelly/*`, `/api/daikin/*`, `/api/weather`) the web dashboard uses.
+ESP32-S3) that mirrors the web dashboard: weather, Spotify controls, and full
+touch control of lights, blinds, and AC. One file, `hdashboard.py` — it only
+calls the Flask API (`/api/shelly/*`, `/api/daikin/*`, `/api/spotify/*`,
+`/api/weather`), never devices or Spotify directly.
 
 ## Quick start
 
@@ -250,6 +250,23 @@ requiring a physical reset. Given that, this uses light sleep only:
 the idle loop's `time.sleep_ms()`, with a plain-`sleep_ms` fallback if it ever
 raises. State is preserved across light sleep (unlike deep sleep, which
 restarts the whole script), so this doesn't change any other behavior.
+
+Some devices lose their Wi-Fi association during light sleep. After every wake,
+the app now re-runs the confirmed `M5.begin()` initialization path and restores
+the fast e-paper mode before the next HTTP call. This is controlled by
+`RECOVER_NETWORK_AFTER_SLEEP` (enabled by default). If a firmware revision
+proves incompatible, set it to `False` temporarily and capture a `DEBUG=True`
+serial log instead of assuming a device endpoint is at fault.
+
+## Spotify controls
+
+When Spotify is configured and authenticated in the Flask dashboard, the
+Música tab shows the active track and output with **Anterior**, **Tocar/Pausa**
+and **Seguinte** controls. **Escolher altifalante** fetches the current Spotify
+Connect devices; selecting one transfers the active playback session without
+starting a separate stream. A receiver only appears while Spotify reports it
+as available, so Raspotify/librespot, Echo, or Google speakers may be absent
+while offline.
 
 `TICK_MS` (the light-sleep duration) is **60 seconds**, not 100ms — the
 point of light sleep is to actually stay asleep between touches, not wake up
