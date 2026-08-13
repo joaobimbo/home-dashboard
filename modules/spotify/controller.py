@@ -112,9 +112,11 @@ class SpotifyController:
         method, path = paths[name]
         return self._api(method, path, params={"device_id": device_id} if device_id else None)
 
-    def transfer(self, device_id):
+    def transfer(self, device_id, play=False):
         if not isinstance(device_id, str) or not device_id: return {"ok": False, "error": "A Spotify device is required"}
-        return self._api("PUT", "/me/player", json={"device_ids": [device_id]})
+        body = {"device_ids": [device_id]}
+        if play: body["play"] = True
+        return self._api("PUT", "/me/player", json=body)
 
     def volume(self, volume, device_id=None):
         if type(volume) is not int or not 0 <= volume <= 100: return {"ok": False, "error": "Volume must be between 0 and 100"}

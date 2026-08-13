@@ -97,7 +97,7 @@ def validate_action(
     elif operation == "spotify_play_playlist":
         _require(set(params) == {"query"}, "Spotify playlist playback requires a name")
         _require(isinstance(params["query"], str) and 1 <= len(params["query"].strip()) <= 200, "Invalid Spotify playlist name")
-    elif operation in {"spotify_pause", "spotify_next", "spotify_previous"}:
+    elif operation in {"spotify_transfer", "spotify_pause", "spotify_next", "spotify_previous"}:
         _require(not params, "Spotify command does not accept parameters")
 
     return {

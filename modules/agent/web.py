@@ -89,6 +89,7 @@ class WebAgent:
             except KeyError:
                 pass
         rule = self.store.create_rule(pending["automation"], creator_user_id=0, origin_chat_id=0)
+        logger.info("web_automation_saved rule_id=%s name=%r", rule["id"], rule["name"])
         return {"ok": True, "kind": "automation_saved", "message": "Automation saved: " + rule["name"]}
 
     def _handle_plan(self, plan: Dict[str, object], original: str, browser_id: str) -> Dict[str, object]:
@@ -160,6 +161,12 @@ class WebAgent:
         lines = ["Save automation: " + rule["name"], rule.get("description") or "", "Trigger: " + trigger_text]
         lines.append("Time zone: " + self.timezone_name)
         lines.append("Repeat: " + rule["repeat"] + "; overlap: " + rule["overlap"])
+        lines.append("Steps:")
+        for step in rule.get("steps", []):
+            if step.get("kind") == "wait": lines.append("• wait " + str(step.get("seconds")) + " seconds")
+            else:
+                action = step.get("action", {})
+                lines.append("• " + str(action.get("display_name")) + ": " + str(action.get("operation")) + " " + str(action.get("parameters")))
         return "\n".join(line for line in lines if line)
 
 

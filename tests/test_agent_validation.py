@@ -111,6 +111,11 @@ class ValidationTests(unittest.TestCase):
                 {"device": "R1", "operation": "rgbcct", "parameters": {"rgb": [256, 0, 0]}},
                 CATALOG,
             )
+
+    def test_validates_spotify_transfer(self):
+        catalog = CATALOG + [{"token": "P1", "id": "echo", "kind": "spotify", "display_name": "Echo", "capabilities": ["spotify_transfer"]}]
+        result = validate_action({"device": "P1", "operation": "spotify_transfer", "parameters": {}}, catalog, persistent=True)
+        self.assertEqual(result["device_id"], "echo")
         with self.assertRaises(PlanValidationError):
             validate_action(
                 {

@@ -71,7 +71,7 @@ class DashboardClient:
                     "token": f"P{index}", "id": str(device["id"]), "kind": "spotify",
                     "component": "speaker", "display_name": str(device.get("name") or "Spotify output"),
                     "other_names": [], "room": "Casa",
-                    "capabilities": ["spotify_play_uri", "spotify_play_playlist", "spotify_pause", "spotify_next", "spotify_previous"],
+                    "capabilities": ["spotify_transfer", "spotify_play_uri", "spotify_play_playlist", "spotify_pause", "spotify_next", "spotify_previous"],
                 })
         return result
 
@@ -169,6 +169,8 @@ class DashboardClient:
                     timeout=45,
                 )
         if kind == "spotify":
+            if operation == "spotify_transfer":
+                return self._post("/api/spotify/device", {"device_id": device_id}, timeout=15)
             if operation == "spotify_play_uri":
                 return self._post("/api/spotify/play-uri", {"uri": params["uri"], "device_id": device_id}, timeout=15)
             if operation == "spotify_play_playlist":
