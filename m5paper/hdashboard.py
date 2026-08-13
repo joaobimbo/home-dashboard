@@ -391,8 +391,9 @@ def get_spotify_devices():
     return _get("/api/spotify/devices")
 
 
-def spotify_command(command):
-    return _post("/api/spotify/%s" % command, {})
+def spotify_command(command, device_id=None):
+    body = {"device_id": device_id} if device_id else {}
+    return _post("/api/spotify/%s" % command, body)
 
 
 def spotify_transfer(device_id):
@@ -1348,7 +1349,8 @@ def handle_action(action):
         redraw()
 
     elif kind == "spotify_command":
-        spotify_command(action["command"])
+        device = app.spotify.get("device") if isinstance(app.spotify, dict) else None
+        spotify_command(action["command"], device.get("id") if isinstance(device, dict) else None)
         app.refresh_spotify()
         redraw()
 

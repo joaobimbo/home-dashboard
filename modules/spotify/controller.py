@@ -76,12 +76,22 @@ class SpotifyController:
             response = requests.request(method, self.API + path, headers={"Authorization": "Bearer " + self._token()}, timeout=10, **kwargs)
         except (requests.RequestException, RuntimeError):
             return {"ok": False, "error": "Spotify is unavailable or not authenticated"}
+        error_data = {}
+        if response.status_code >= 400:
+            try:
+                error_data = response.json() if response.content else {}
+            except ValueError:
+                error_data = {}
         if response.status_code == 429:
             return {"ok": False, "error": "Spotify rate limit; try again in " + response.headers.get("Retry-After", "a moment") + " seconds"}
         if response.status_code == 401:
             return {"ok": False, "error": "Spotify authentication expired; sign in again"}
         if response.status_code == 403:
             return {"ok": False, "error": "Spotify denied this playback request"}
+        if response.status_code == 404 and path.startswith("/me/player"):
+            message = error_data.get("error", {}).get("message", "") if isinstance(error_data, dict) else ""
+            if "device" in message.lower() or not message:
+                return {"ok": False, "error": "No active Spotify speaker. Choose an output, then try again."}
         if response.status_code >= 400:
             return {"ok": False, "error": "Spotify request failed (" + str(response.status_code) + ")"}
         try:
