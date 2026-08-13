@@ -56,6 +56,14 @@
   var suppressClickUntil = 0;
   var debugEnabled = /[?&]debug=1\b/.test(window.location.search);
   var debugBox = null;
+  var agentForm = document.getElementById("agent-form");
+  var agentMessage = document.getElementById("agent-message");
+  var agentSend = document.getElementById("agent-send");
+  var agentResult = document.getElementById("agent-result");
+  var agentConfirmActions = document.getElementById("agent-confirm-actions");
+  var agentConfirm = document.getElementById("agent-confirm");
+  var agentCancel = document.getElementById("agent-cancel");
+  var agentConfirmationToken = null;
 
   function debugLog(message) {
     if (!debugEnabled) {
@@ -103,9 +111,40 @@
         return;
       }
       debugLog("HTTP " + method + " " + url + " -> " + xhr.status);
-      done(new Error("Request failed"));
+      try {
+        done(new Error("Request failed"), JSON.parse(xhr.responseText));
+      } catch (_error) {
+        done(new Error("Request failed"));
+      }
     };
     xhr.send(payload ? JSON.stringify(payload) : null);
+  }
+
+  function showAgentResult(message, isError) {
+    if (!agentResult) {
+      return;
+    }
+    agentResult.hidden = false;
+    agentResult.textContent = message;
+    if (isError) {
+      agentResult.classList.add("is-error");
+    } else {
+      agentResult.classList.remove("is-error");
+    }
+  }
+
+  function setAgentBusy(busy) {
+    if (agentSend) {
+      agentSend.disabled = busy;
+      agentSend.textContent = busy ? "A interpretar…" : "Enviar";
+    }
+  }
+
+  function clearAgentConfirmation() {
+    agentConfirmationToken = null;
+    if (agentConfirmActions) {
+      agentConfirmActions.hidden = true;
+    }
   }
 
   function closestWithAttr(node, attrName) {
@@ -1320,6 +1359,62 @@
       if (!isPageHidden()) {
         refreshAll();
       }
+    });
+  }
+
+  if (agentForm) {
+    agentForm.addEventListener("submit", function (event) {
+      var message = agentMessage ? agentMessage.value.replace(/^\s+|\s+$/g, "") : "";
+      event.preventDefault();
+      clearAgentConfirmation();
+      if (!message) {
+        showAgentResult("Escreva um pedido para o assistente.", true);
+        return;
+      }
+      setAgentBusy(true);
+      showAgentResult("A interpretar o pedido…", false);
+      requestJSON("POST", "/api/agent/request", {message: message}, function (err, result) {
+        setAgentBusy(false);
+        if (err || !result || !result.ok) {
+          showAgentResult((result && result.error) || "Não foi possível contactar o assistente.", true);
+          return;
+        }
+        showAgentResult(result.message || "Concluído.", false);
+        if (result.kind === "automation_confirmation" && result.token) {
+          agentConfirmationToken = result.token;
+          if (agentConfirmActions) {
+            agentConfirmActions.hidden = false;
+          }
+        }
+      });
+    });
+  }
+
+  if (agentCancel) {
+    agentCancel.addEventListener("click", function () {
+      clearAgentConfirmation();
+      showAgentResult("Automação cancelada.", false);
+    });
+  }
+
+  if (agentConfirm) {
+    agentConfirm.addEventListener("click", function () {
+      var token = agentConfirmationToken;
+      if (!token) {
+        return;
+      }
+      agentConfirm.disabled = true;
+      agentConfirm.textContent = "A guardar…";
+      requestJSON("POST", "/api/agent/confirm", {token: token}, function (err, result) {
+        agentConfirm.disabled = false;
+        agentConfirm.textContent = "Guardar automação";
+        clearAgentConfirmation();
+        if (err || !result || !result.ok) {
+          showAgentResult((result && result.error) || "Não foi possível guardar a automação.", true);
+          return;
+        }
+        showAgentResult(result.message || "Automação guardada.", false);
+      });
     });
   }
 
