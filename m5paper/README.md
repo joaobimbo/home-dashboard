@@ -259,7 +259,10 @@ and **Seguinte** controls. **Escolher altifalante** fetches the current Spotify
 Connect devices; selecting one transfers the active playback session without
 starting a separate stream. A receiver only appears while Spotify reports it
 as available, so Raspotify/librespot, Echo, or Google speakers may be absent
-while offline.
+while offline. Playback commands target the current output. Select an output
+first if Spotify reports that no active speaker is available; successful
+Spotify playback commands return no response body, which the panel treats as
+success.
 
 With the default awake idle mode, `AWAKE_IDLE_MS` is **50ms**. This is a
 small power trade-off for stable Wi-Fi. `TICK_MS` remains the 60-second

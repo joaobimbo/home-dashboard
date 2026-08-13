@@ -23,4 +23,8 @@ LIBRESPOT_BACKEND=alsa
 LIBRESPOT_DEVICE="plughw:CARD=Intel,DEV=0"
 ```
 
-Use `aplay -L` to find the actual audio output; do not copy the example if your host differs. Restart with `sudo systemctl restart raspotify`. The Música tab lists only devices Spotify currently reports as available, so an Echo, Google speaker, or Raspotify receiver may disappear while offline. Timed Spotify playback is created through the automation agent, not the Música tab.
+Use `aplay -L` to find the actual audio output; do not copy the example if your host differs. Restart with `sudo systemctl restart raspotify`. The Música tab lists only devices Spotify currently reports as available, so an Echo, Google speaker, or Raspotify receiver may disappear while offline. Select an output before starting playback; the dashboard targets that output for play/pause/skip commands. Timed Spotify playback is created through the automation agent, not the Música tab.
+
+Spotify control endpoints are internal API endpoints: playback actions such as
+`/api/spotify/play` require an HTTP `POST`, so opening one directly in a
+browser correctly returns `405 Method Not Allowed`.
