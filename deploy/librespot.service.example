@@ -1,0 +1,12 @@
+[Unit]
+Description=Spotify Connect receiver for Sala Hi-Fi
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=YOUR_LINUX_USER
+ExecStart=/usr/bin/librespot --name "Sala Hi-Fi" --device-type speaker --backend alsa --device "plughw:CARD=Intel,DEV=0"
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

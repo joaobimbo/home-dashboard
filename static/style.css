@@ -211,6 +211,17 @@ h1 {
   color: var(--text-soft);
 }
 
+.music-card { max-width: 620px; margin: 0 auto; padding: 0.6rem; }
+.music-card[hidden] { display: none; }
+.spotify-now-playing { display: flex; gap: 0.9rem; align-items: center; }
+.spotify-now-playing h3 { margin: 0; }.spotify-now-playing p { margin: 0.25rem 0; color: var(--text-soft); }
+.spotify-art { width: 84px; height: 84px; object-fit: cover; border-radius: 10px; background: var(--tile); }
+.spotify-controls { display: flex; justify-content: center; gap: 0.7rem; margin: 1rem 0; }
+.spotify-controls .cover-cmd { min-width: 52px; min-height: 42px; }
+.spotify-label { display: block; margin-top: 0.7rem; font-size: 0.85rem; font-weight: 700; color: var(--text-soft); }
+.spotify-select, .spotify-schedule input { width: 100%; min-height: 38px; padding: 0.45rem; border: 1px solid var(--tile-border); border-radius: 8px; background: rgba(255,252,246,.82); font: inherit; }
+.spotify-schedule { display: grid; gap: 0.55rem; margin-top: 1rem; padding-top: 0.8rem; border-top: 1px solid var(--panel-border); }.spotify-schedule h3 { margin: 0; }.spotify-schedule label { color: var(--text-soft); }
+
 h2 {
   margin: 0;
   font-size: 1.05rem;

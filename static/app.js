@@ -64,6 +64,14 @@
   var agentConfirm = document.getElementById("agent-confirm");
   var agentCancel = document.getElementById("agent-cancel");
   var agentConfirmationToken = null;
+  var spotifyTimer = null;
+  var spotifyDevices = [];
+  var spotifyPlayer = document.getElementById("spotify-player");
+  var spotifyLogin = document.getElementById("spotify-login");
+  var spotifyUnconfigured = document.getElementById("spotify-unconfigured");
+  var spotifyDevice = document.getElementById("spotify-device");
+  var spotifyVolume = document.getElementById("spotify-volume");
+  var spotifyVolumeValue = document.getElementById("spotify-volume-value");
 
   function debugLog(message) {
     if (!debugEnabled) {
@@ -146,6 +154,41 @@
       agentConfirmActions.hidden = true;
     }
   }
+
+  function spotifyMessage(value, error) {
+    var node = document.getElementById("spotify-message");
+    if (!node) { return; }
+    node.hidden = !value;
+    node.textContent = value || "";
+    if (error) { node.classList.add("is-error"); } else { node.classList.remove("is-error"); }
+  }
+
+  function refreshSpotify() {
+    requestJSON("GET", "/api/spotify/auth/status", null, function (_err, auth) {
+      if (!auth || !auth.configured) { if (spotifyUnconfigured) { spotifyUnconfigured.hidden = false; } return; }
+      if (!auth.authenticated) { if (spotifyLogin) { spotifyLogin.hidden = false; } return; }
+      if (spotifyPlayer) { spotifyPlayer.hidden = false; }
+      requestJSON("GET", "/api/spotify/status", null, function (_statusErr, status) {
+        var track; var art = document.getElementById("spotify-art");
+        if (!status || !status.ok) { spotifyMessage((status && status.error) || "Spotify indisponível.", true); return; }
+        track = status.track;
+        document.getElementById("spotify-track").textContent = track ? track.name : "Sem reprodução ativa";
+        document.getElementById("spotify-artist").textContent = track ? track.artists.join(", ") : "—";
+        document.getElementById("spotify-album").textContent = track ? (track.album || "") : "—";
+        document.getElementById("spotify-toggle").textContent = status.is_playing ? "❚❚" : "▶";
+        if (art) { art.hidden = !(track && track.image); if (track && track.image) { art.src = track.image; } }
+        if (spotifyVolume && status.device) { spotifyVolume.value = status.device.volume_percent || 0; spotifyVolume.disabled = !status.device.supports_volume; spotifyVolumeValue.textContent = status.device.supports_volume ? String(spotifyVolume.value) + "%" : "indisponível"; }
+      });
+      requestJSON("GET", "/api/spotify/devices", null, function (_deviceErr, result) {
+        var i; var option;
+        if (!result || !result.ok || !spotifyDevice) { return; }
+        spotifyDevices = result.devices || []; spotifyDevice.innerHTML = "";
+        for (i = 0; i < spotifyDevices.length; i += 1) { option = document.createElement("option"); option.value = spotifyDevices[i].id; option.textContent = (spotifyDevices[i].is_active ? "✓ " : "") + spotifyDevices[i].name; option.selected = spotifyDevices[i].is_active; spotifyDevice.appendChild(option); }
+      });
+    });
+  }
+
+  function spotifyPost(path, payload) { requestJSON("POST", path, payload, function (err, result) { spotifyMessage(err || !result || !result.ok ? ((result && result.error) || "Pedido Spotify falhou.") : "", true); refreshSpotify(); }); }
 
   function closestWithAttr(node, attrName) {
     while (node && node !== document.body) {
@@ -1418,6 +1461,24 @@
     });
   }
 
+  document.addEventListener("click", function (event) {
+    var button = closestWithAttr(event.target, "data-spotify-command");
+    var command;
+    if (!button) { return; }
+    command = button.getAttribute("data-spotify-command");
+    if (command === "toggle") { command = button.textContent === "❚❚" ? "pause" : "play"; }
+    spotifyPost("/api/spotify/" + command, {device_id: spotifyDevice ? spotifyDevice.value : null});
+  });
+
+  if (spotifyDevice) { spotifyDevice.addEventListener("change", function () { spotifyPost("/api/spotify/device", {device_id: spotifyDevice.value}); }); }
+  if (spotifyVolume) { spotifyVolume.addEventListener("change", function () { spotifyPost("/api/spotify/volume", {volume: parseInt(spotifyVolume.value, 10), device_id: spotifyDevice ? spotifyDevice.value : null}); }); }
+  if (document.getElementById("spotify-schedule-form")) {
+    document.getElementById("spotify-schedule-form").addEventListener("submit", function (event) {
+      event.preventDefault();
+      spotifyPost("/api/spotify/schedules", {name: document.getElementById("spotify-schedule-name").value, uri: document.getElementById("spotify-schedule-uri").value, at: document.getElementById("spotify-schedule-time").value, daily: document.getElementById("spotify-schedule-daily").checked, date: document.getElementById("spotify-schedule-date").value, device_id: spotifyDevice ? spotifyDevice.value : ""});
+    });
+  }
+
   tickClock();
   setInterval(tickClock, 1000);
   refreshAll();
@@ -1426,4 +1487,6 @@
   startAcStatusPolling();
   refreshWeather();
   startWeatherPolling();
+  refreshSpotify();
+  spotifyTimer = setInterval(function () { if (!isPageHidden()) { refreshSpotify(); } }, 10000);
 })();

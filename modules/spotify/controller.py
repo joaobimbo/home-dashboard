@@ -1,38 +1,130 @@
-import os,time,secrets
+"""Server-side Spotify Connect and OAuth controller."""
+import os
+import secrets
+import time
 from pathlib import Path
+
 import requests
+
 from .auth import TokenStore
+
+
 class SpotifyController:
- SCOPES='user-read-playback-state user-modify-playback-state user-read-currently-playing'
- def __init__(self):
-  self.client_id=os.getenv('SPOTIFY_CLIENT_ID',''); self.secret=os.getenv('SPOTIFY_CLIENT_SECRET',''); self.redirect=os.getenv('SPOTIFY_REDIRECT_URI',''); self.store=TokenStore(os.getenv('SPOTIFY_TOKEN_FILE',str(Path.home()/'.config/home-dashboard/spotify-token.json'))); self.state=None
- @property
- def configured(self): return bool(self.client_id and self.secret and self.redirect)
- def auth_status(self): return {'ok':True,'configured':self.configured,'authenticated':bool(self.store.load().get('refresh_token'))}
- def login_url(self):
-  self.state=secrets.token_urlsafe(24); return 'https://accounts.spotify.com/authorize?'+requests.compat.urlencode({'client_id':self.client_id,'response_type':'code','redirect_uri':self.redirect,'scope':self.SCOPES,'state':self.state})
- def callback(self,code,state):
-  if not self.state or not secrets.compare_digest(state or '',self.state): return {'ok':False,'error':'Invalid Spotify authorization state'}
-  r=requests.post('https://accounts.spotify.com/api/token',data={'grant_type':'authorization_code','code':code,'redirect_uri':self.redirect},auth=(self.client_id,self.secret),timeout=10)
-  if not r.ok:return {'ok':False,'error':'Spotify authorization failed'}
-  d=r.json(); d['expires_at']=time.time()+d.get('expires_in',3600); self.store.save(d); return {'ok':True}
- def _token(self):
-  d=self.store.load()
-  if not d.get('access_token'): raise RuntimeError('Spotify is not authenticated')
-  if d.get('expires_at',0)<time.time()+60:
-   r=requests.post('https://accounts.spotify.com/api/token',data={'grant_type':'refresh_token','refresh_token':d['refresh_token']},auth=(self.client_id,self.secret),timeout=10); d.update(r.json());d['expires_at']=time.time()+d.get('expires_in',3600);self.store.save(d)
-  return d['access_token']
- def _api(self,method,path,**kw):
-  try:r=requests.request(method,'https://api.spotify.com/v1'+path,headers={'Authorization':'Bearer '+self._token()},timeout=10,**kw)
-  except (requests.RequestException,RuntimeError) as e:return {'ok':False,'error':str(e)}
-  if r.status_code==429:return {'ok':False,'error':'Spotify rate limit; retry after '+r.headers.get('Retry-After','a moment')}
-  if r.status_code>=400:return {'ok':False,'error':'Spotify request failed ('+str(r.status_code)+')'}
-  return {'ok':True,'data':r.json() if r.content else {}}
- def devices(self):
-  x=self._api('GET','/me/player/devices'); return x if not x['ok'] else {'ok':True,'devices':[{'id':d['id'],'name':d['name'],'type':d['type'],'is_active':d['is_active'],'is_restricted':d['is_restricted'],'volume_percent':d.get('volume_percent'),'supports_volume':not d['is_restricted']} for d in x['data'].get('devices',[])]}
- def status(self):
-  x=self._api('GET','/me/player');
-  if not x['ok']:return x
-  d=x['data']; i=d.get('item') or {}; return {'ok':True,'authenticated':True,'is_playing':d.get('is_playing',False),'progress_ms':d.get('progress_ms',0),'device':d.get('device'),'track':None if not i else {'id':i.get('id'),'uri':i.get('uri'),'name':i.get('name'),'artists':[a['name'] for a in i.get('artists',[])],'album':i.get('album',{}).get('name'),'duration_ms':i.get('duration_ms'),'image':next((z['url'] for z in i.get('album',{}).get('images',[])),None)}}
- def command(self,name,payload={}):
-  paths={'play':('PUT','/me/player/play'),'pause':('PUT','/me/player/pause'),'next':('POST','/me/player/next'),'previous':('POST','/me/player/previous')}; m,p=paths[name];return self._api(m,p,params={'device_id':payload.get('device_id')} if payload.get('device_id') else None)
+    API = "https://api.spotify.com/v1"
+    TOKEN_URL = "https://accounts.spotify.com/api/token"
+    AUTHORIZE_URL = "https://accounts.spotify.com/authorize"
+    SCOPES = "user-read-playback-state user-modify-playback-state user-read-currently-playing"
+
+    def __init__(self):
+        self.client_id = os.environ.get("SPOTIFY_CLIENT_ID", "").strip()
+        self.client_secret = os.environ.get("SPOTIFY_CLIENT_SECRET", "").strip()
+        self.redirect_uri = os.environ.get("SPOTIFY_REDIRECT_URI", "").strip()
+        path = os.environ.get("SPOTIFY_TOKEN_FILE", str(Path.home() / ".config/home-dashboard/spotify-token.json"))
+        self.store = TokenStore(path)
+        self._state = None
+
+    @property
+    def configured(self):
+        return bool(self.client_id and self.client_secret and self.redirect_uri)
+
+    def auth_status(self):
+        token = self.store.load()
+        return {"ok": True, "configured": self.configured, "authenticated": bool(token.get("refresh_token"))}
+
+    def login_url(self):
+        self._state = secrets.token_urlsafe(24)
+        return self.AUTHORIZE_URL + "?" + requests.compat.urlencode({
+            "client_id": self.client_id, "response_type": "code", "redirect_uri": self.redirect_uri,
+            "scope": self.SCOPES, "state": self._state,
+        })
+
+    def callback(self, code, state):
+        if not self._state or not secrets.compare_digest(str(state or ""), self._state):
+            return {"ok": False, "error": "Invalid Spotify authorization state"}
+        return self._save_token({"grant_type": "authorization_code", "code": code, "redirect_uri": self.redirect_uri})
+
+    def _save_token(self, form):
+        try:
+            response = requests.post(self.TOKEN_URL, data=form, auth=(self.client_id, self.client_secret), timeout=10)
+            data = response.json() if response.content else {}
+        except (requests.RequestException, ValueError):
+            return {"ok": False, "error": "Spotify authorization is unavailable"}
+        if not response.ok or not data.get("access_token"):
+            return {"ok": False, "error": "Spotify authorization failed"}
+        old = self.store.load()
+        if not data.get("refresh_token"):
+            data["refresh_token"] = old.get("refresh_token")
+        data["expires_at"] = time.time() + int(data.get("expires_in", 3600))
+        self.store.save(data)
+        return {"ok": True}
+
+    def _token(self):
+        data = self.store.load()
+        if not data.get("access_token"):
+            raise RuntimeError("Spotify is not authenticated")
+        if float(data.get("expires_at", 0)) < time.time() + 60:
+            result = self._save_token({"grant_type": "refresh_token", "refresh_token": data.get("refresh_token", "")})
+            if not result["ok"]:
+                raise RuntimeError(result["error"])
+            data = self.store.load()
+        return data["access_token"]
+
+    def _api(self, method, path, **kwargs):
+        if not self.configured:
+            return {"ok": False, "error": "Spotify is not configured"}
+        try:
+            response = requests.request(method, self.API + path, headers={"Authorization": "Bearer " + self._token()}, timeout=10, **kwargs)
+        except (requests.RequestException, RuntimeError):
+            return {"ok": False, "error": "Spotify is unavailable or not authenticated"}
+        if response.status_code == 429:
+            return {"ok": False, "error": "Spotify rate limit; try again in " + response.headers.get("Retry-After", "a moment") + " seconds"}
+        if response.status_code == 401:
+            return {"ok": False, "error": "Spotify authentication expired; sign in again"}
+        if response.status_code == 403:
+            return {"ok": False, "error": "Spotify denied this playback request"}
+        if response.status_code >= 400:
+            return {"ok": False, "error": "Spotify request failed (" + str(response.status_code) + ")"}
+        try:
+            return {"ok": True, "data": response.json() if response.content else {}}
+        except ValueError:
+            return {"ok": False, "error": "Spotify returned an invalid response"}
+
+    @staticmethod
+    def _device(device):
+        if not isinstance(device, dict): return None
+        return {"id": device.get("id"), "name": device.get("name"), "type": device.get("type"), "is_active": bool(device.get("is_active")), "is_restricted": bool(device.get("is_restricted")), "volume_percent": device.get("volume_percent"), "supports_volume": not bool(device.get("is_restricted")) and device.get("volume_percent") is not None}
+
+    def devices(self):
+        result = self._api("GET", "/me/player/devices")
+        return result if not result["ok"] else {"ok": True, "devices": [self._device(item) for item in result["data"].get("devices", []) if item.get("id")]}
+
+    def status(self):
+        result = self._api("GET", "/me/player")
+        if not result["ok"]: return result
+        data = result["data"]
+        if not data: return {"ok": True, "authenticated": True, "is_playing": False, "device": None, "track": None}
+        item = data.get("item") or {}; album = item.get("album") or {}
+        return {"ok": True, "authenticated": True, "is_playing": bool(data.get("is_playing")), "progress_ms": data.get("progress_ms", 0), "device": self._device(data.get("device")), "track": None if not item else {"id": item.get("id"), "uri": item.get("uri"), "name": item.get("name"), "artists": [artist.get("name") for artist in item.get("artists", [])], "album": album.get("name"), "duration_ms": item.get("duration_ms"), "image": next((image.get("url") for image in album.get("images", []) if image.get("url")), None)}}
+
+    def command(self, name, payload=None):
+        payload = payload or {}; device_id = payload.get("device_id")
+        paths = {"play": ("PUT", "/me/player/play"), "pause": ("PUT", "/me/player/pause"), "next": ("POST", "/me/player/next"), "previous": ("POST", "/me/player/previous")}
+        method, path = paths[name]
+        return self._api(method, path, params={"device_id": device_id} if device_id else None)
+
+    def transfer(self, device_id):
+        if not isinstance(device_id, str) or not device_id: return {"ok": False, "error": "A Spotify device is required"}
+        return self._api("PUT", "/me/player", json={"device_ids": [device_id]})
+
+    def volume(self, volume, device_id=None):
+        if type(volume) is not int or not 0 <= volume <= 100: return {"ok": False, "error": "Volume must be between 0 and 100"}
+        params = {"volume_percent": volume}
+        if device_id: params["device_id"] = device_id
+        return self._api("PUT", "/me/player/volume", params=params)
+
+    def play_uri(self, uri, device_id=None):
+        if not isinstance(uri, str) or not uri.startswith("spotify:"): return {"ok": False, "error": "Invalid Spotify URI"}
+        kind = uri.split(":", 2)[1] if uri.count(":") >= 2 else ""
+        body = {"uris": [uri]} if kind == "track" else {"context_uri": uri} if kind in {"album", "playlist"} else None
+        if body is None: return {"ok": False, "error": "Only Spotify tracks, albums, and playlists are supported"}
+        return self._api("PUT", "/me/player/play", params={"device_id": device_id} if device_id else None, json=body)
