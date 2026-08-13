@@ -75,6 +75,8 @@ def spotify_callback():
 def spotify_status(): return jsonify(spotify.status())
 @app.route('/api/spotify/devices')
 def spotify_devices(): return jsonify(spotify.devices())
+@app.route('/api/spotify/search')
+def spotify_search(): return jsonify(spotify.search(request.args.get('q','')))
 @app.route('/api/spotify/<command>',methods=['POST'])
 def spotify_command(command):
     payload=request.get_json(silent=True) or {}

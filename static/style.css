@@ -220,6 +220,7 @@ h1 {
 .spotify-controls .cover-cmd { min-width: 52px; min-height: 42px; }
 .spotify-label { display: block; margin-top: 0.7rem; font-size: 0.85rem; font-weight: 700; color: var(--text-soft); }
 .spotify-select, .spotify-schedule input { width: 100%; min-height: 38px; padding: 0.45rem; border: 1px solid var(--tile-border); border-radius: 8px; background: rgba(255,252,246,.82); font: inherit; }
+.spotify-search { display: flex; gap: .45rem; margin-top: .8rem; }.spotify-search input { flex: 1; min-width: 0; padding: .45rem; border: 1px solid var(--tile-border); border-radius: 8px; font: inherit; }.spotify-results { display: grid; gap: .35rem; margin-top: .5rem; }.spotify-result { text-align: left; padding: .55rem; border: 1px solid var(--tile-border); border-radius: 8px; background: rgba(242,230,210,.72); color: var(--text-main); font: inherit; }
 
 h2 {
   margin: 0;

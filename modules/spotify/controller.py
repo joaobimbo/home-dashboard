@@ -136,3 +136,18 @@ class SpotifyController:
         items = result["data"].get("playlists", {}).get("items", [])
         if not items or not items[0].get("uri"): return {"ok": False, "error": "Spotify could not find that playlist"}
         return self.play_uri(items[0]["uri"], device_id)
+
+    def search(self, query):
+        if not isinstance(query, str) or not query.strip(): return {"ok": False, "error": "Enter something to search for"}
+        result = self._api("GET", "/search", params={"q": query.strip(), "type": "track,album,playlist", "limit": 5})
+        if not result["ok"]: return result
+        results = []
+        for kind, key in (("track", "tracks"), ("album", "albums"), ("playlist", "playlists")):
+            for item in result["data"].get(key, {}).get("items", []):
+                if not item or not item.get("uri"): continue
+                album = item.get("album") or {}; images = item.get("images") or album.get("images") or []
+                artists = item.get("artists") or []
+                subtitle = " · ".join(artist.get("name", "") for artist in artists) or (item.get("owner") or {}).get("display_name", "")
+                if kind == "track" and album.get("name"): subtitle += " — " + album["name"]
+                results.append({"type": kind, "name": item.get("name", "Spotify"), "subtitle": subtitle, "uri": item["uri"], "image": next((image.get("url") for image in images if image.get("url")), None)})
+        return {"ok": True, "results": results}

@@ -109,6 +109,11 @@
               </div>
               <label class="spotify-label" for="spotify-device">Saída</label>
               <select id="spotify-device" class="spotify-select"></select>
+              <form id="spotify-search-form" class="spotify-search">
+                <input id="spotify-search-query" placeholder="Procurar música, álbum ou playlist" aria-label="Procurar no Spotify">
+                <button type="submit" class="cover-modal-btn">Procurar</button>
+              </form>
+              <div id="spotify-results" class="spotify-results" hidden></div>
               <label class="spotify-label" for="spotify-volume">Volume <span id="spotify-volume-value">—</span></label>
               <input id="spotify-volume" class="cover-modal-slider" type="range" min="0" max="100" step="1" value="50">
               <p id="spotify-message" class="spotify-message" hidden></p>
@@ -322,6 +327,6 @@
   <script>
     window.__CONFIGURED_DEVICES__ = {{ devices|tojson }};
   </script>
-  <script src="{{ url_for('static', filename='app.js', v='31') }}"></script>
+  <script src="{{ url_for('static', filename='app.js', v='32') }}"></script>
 </body>
 </html>

@@ -1472,6 +1472,19 @@
 
   if (spotifyDevice) { spotifyDevice.addEventListener("change", function () { spotifyPost("/api/spotify/device", {device_id: spotifyDevice.value}); }); }
   if (spotifyVolume) { spotifyVolume.addEventListener("change", function () { spotifyPost("/api/spotify/volume", {volume: parseInt(spotifyVolume.value, 10), device_id: spotifyDevice ? spotifyDevice.value : null}); }); }
+  if (document.getElementById("spotify-search-form")) {
+    document.getElementById("spotify-search-form").addEventListener("submit", function (event) {
+      var query = document.getElementById("spotify-search-query").value; var results = document.getElementById("spotify-results");
+      event.preventDefault();
+      requestJSON("GET", "/api/spotify/search?q=" + encodeURIComponent(query), null, function (err, result) {
+        var i; var item; var button;
+        if (err || !result || !result.ok) { spotifyMessage((result && result.error) || "A pesquisa falhou.", true); return; }
+        results.innerHTML = ""; results.hidden = false;
+        for (i = 0; i < result.results.length; i += 1) { item = result.results[i]; button = document.createElement("button"); button.type = "button"; button.className = "spotify-result"; button.setAttribute("data-spotify-uri", item.uri); button.textContent = item.name + " — " + item.subtitle; results.appendChild(button); }
+      });
+    });
+    document.getElementById("spotify-results").addEventListener("click", function (event) { var item = closestWithAttr(event.target, "data-spotify-uri"); if (item) { spotifyPost("/api/spotify/play-uri", {uri: item.getAttribute("data-spotify-uri"), device_id: spotifyDevice ? spotifyDevice.value : null}); } });
+  }
 
   tickClock();
   setInterval(tickClock, 1000);

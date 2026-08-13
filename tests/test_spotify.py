@@ -17,3 +17,7 @@ class SpotifyTests(unittest.TestCase):
   with mock.patch('modules.spotify.controller.requests.request',return_value=Response(200,{})): self.assertIsNone(self.c.status()['track'])
  def test_rate_limit(self):
   with mock.patch('modules.spotify.controller.requests.request',return_value=Response(429,headers={'Retry-After':'12'})): self.assertIn('12',self.c.devices()['error'])
+ def test_search_normalizes_track(self):
+  data={'tracks':{'items':[{'name':'So What','uri':'spotify:track:1','artists':[{'name':'Miles Davis'}],'album':{'name':'Kind of Blue','images':[{'url':'cover'}]}}]},'albums':{'items':[]},'playlists':{'items':[]}}
+  with mock.patch('modules.spotify.controller.requests.request',return_value=Response(200,data)): result=self.c.search('so what')
+  self.assertEqual(result['results'][0]['uri'],'spotify:track:1')
