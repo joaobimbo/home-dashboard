@@ -25,7 +25,7 @@ class AutomationEngine:
         client: DashboardClient,
         notifier: Optional[Notifier] = None,
         timezone_name: str = "Europe/Lisbon",
-        device_poll_seconds: int = 10,
+        device_poll_seconds: int = 30,
         weather_poll_seconds: int = 15 * 60,
     ):
         self.store = store

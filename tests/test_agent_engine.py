@@ -66,6 +66,7 @@ class EngineTests(unittest.TestCase):
             self.client,
             notifier=lambda chat, message: self.messages.append((chat, message)),
         )
+        self.assertEqual(self.engine.device_poll_seconds, 30)
         self.start = datetime(2026, 8, 11, 20, 0, tzinfo=timezone.utc)
 
     def tearDown(self):

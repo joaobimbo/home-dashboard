@@ -1,10 +1,17 @@
-from flask import Flask, jsonify, render_template, request
+import logging
+import os
+import subprocess
 
+from flask import Flask, jsonify, render_template, request
 from modules.shelly import SceneStore, ShellyController
 from modules.daikin import DaikinController
 from modules.weather import get_weather
-import os
-import subprocess
+
+
+# The dashboard and automation agent poll several read-only endpoints. Keep
+# request failures in the journal, but suppress Werkzeug's routine 200 access
+# lines so they do not drown out device and application errors.
+logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
 app = Flask(__name__)
 controller = ShellyController.from_sources()
