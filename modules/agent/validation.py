@@ -131,7 +131,19 @@ def validate_expression(
 ) -> Dict[str, object]:
     _require(isinstance(expression, dict), "Expression must be an object")
     source = str(expression.get("source", ""))
-    operator = str(expression.get("operator", ""))
+    operator_value = expression.get("operator")
+    schedule_type = expression.get("type")
+    if (
+        source == "schedule"
+        and operator_value not in (None, "")
+        and schedule_type not in (None, "")
+        and operator_value != schedule_type
+    ):
+        raise PlanValidationError("Conflicting schedule operators")
+    # Gemini occasionally calls the schedule operator "type" despite the
+    # provider-neutral contract naming it "operator". Normalize only this
+    # harmless alias before applying the usual strict schedule validation.
+    operator = str(operator_value or (schedule_type if source == "schedule" else ""))
     result = {
         "source": source,
         "field": str(expression.get("field", "")),

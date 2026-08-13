@@ -248,6 +248,35 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(result["trigger"]["at"], "07:00")
         self.assertEqual(result["steps"][0]["action"]["device_id"], "bedroom-cover")
 
+    def test_normalizes_gemini_schedule_type_alias(self):
+        raw = {
+            "kind": "automation",
+            "automation": {
+                "name": "Turn RGB red at five",
+                "description": "Sets the RGB light to red at 17:00",
+                "trigger": {"source": "schedule", "type": "daily", "at": "17:00"},
+                "conditions": [],
+                "cancel_conditions": [],
+                "steps": [
+                    {
+                        "kind": "action",
+                        "action": {
+                            "device": "R1",
+                            "operation": "rgbcct",
+                            "parameters": {"state": "on", "rgb": [255, 0, 0]},
+                        },
+                    }
+                ],
+                "repeat": "reusable",
+                "overlap": "ignore",
+            },
+        }
+
+        result = validate_interpretation(raw, CATALOG)["automation"]
+
+        self.assertEqual(result["trigger"]["operator"], "daily")
+        self.assertEqual(result["trigger"]["at"], "17:00")
+
     def test_validates_clock_comparison_conditions(self):
         for operator in ("eq", "ne", "gt", "gte", "lt", "lte"):
             result = validate_expression(

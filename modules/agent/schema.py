@@ -209,6 +209,7 @@ Expression rules:
   number of seconds after the user confirms the rule
 - clock schedules use source=schedule, operator once/daily/weekly, and at as
   ISO-8601 local datetime for once or HH:MM for daily/weekly; Monday is weekday 0
+- put the schedule frequency in operator, never in a type field
 - use source=schedule (not source=time) for actions at a clock time; for example,
   "open the blinds every day at 7am" is operator=daily with at=07:00
 - time conditions use source=time and field=local_time. Use eq/ne/gt/gte/lt/lte
@@ -309,7 +310,7 @@ then action-on, wait=10, action-off. Actions at a clock time must use a schedule
 trigger: for example, "open the blinds every day at 7am" uses daily and at=07:00.
 Clock schedules use once/daily/weekly and at. Time conditions use source=time,
 field=local_time, and eq/ne/gt/gte/lt/lte/between; they are conditions, never
-triggers. Steps are
+triggers. Put the schedule frequency in operator, never type. Steps are
 {{"kind":"wait","seconds":1800}} or
 {{"kind":"action","action":<call object>}}. The only repeat values are exactly
 "once" and "reusable"; relative after rules must use "once". The only overlap
