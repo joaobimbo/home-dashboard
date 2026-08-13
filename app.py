@@ -9,8 +9,6 @@ from modules.daikin import DaikinController
 from modules.weather import get_weather
 from modules.agent.web import AgentBridgeClient, AgentBridgeError
 from modules.spotify import SpotifyController
-from modules.spotify.schedules import SpotifyScheduleStore
-import threading
 
 
 # The dashboard and automation agent poll several read-only endpoints. Keep
@@ -25,8 +23,6 @@ daikin_controller = DaikinController.from_sources()
 daikin_controller.start_background_polling()
 web_agent = AgentBridgeClient(os.environ.get("AGENT_WEB_URL", "http://127.0.0.1:5001"))
 spotify = SpotifyController()
-spotify_schedules = SpotifyScheduleStore(spotify, os.environ.get("SPOTIFY_SCHEDULE_FILE", "var/spotify-schedules.json"))
-threading.Thread(target=spotify_schedules.run, name="spotify-schedules", daemon=True).start()
 
 
 @app.route("/")
@@ -86,12 +82,8 @@ def spotify_command(command):
     if command=='device': return jsonify(spotify.transfer(payload.get('device_id')))
     if command=='volume': return jsonify(spotify.volume(payload.get('volume'),payload.get('device_id')))
     if command=='play-uri': return jsonify(spotify.play_uri(payload.get('uri'),payload.get('device_id')))
+    if command=='play-playlist': return jsonify(spotify.play_playlist_query(payload.get('query'),payload.get('device_id')))
     return jsonify({'ok':False,'error':'Invalid Spotify command'}),404
-@app.route('/api/spotify/schedules',methods=['GET','POST'])
-def spotify_schedule():
-    if request.method=='GET': return jsonify({'ok':True,'schedules':spotify_schedules.list()})
-    try:return jsonify({'ok':True,'schedule':spotify_schedules.add(request.get_json(silent=True) or {})})
-    except ValueError as exc:return jsonify({'ok':False,'error':str(exc)}),400
 
 
 def _web_agent_browser_id():

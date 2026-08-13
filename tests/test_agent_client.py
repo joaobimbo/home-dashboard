@@ -20,6 +20,8 @@ class FakeClient(DashboardClient):
             ]
         if path == "/api/daikin/devices":
             return []
+        if path == "/api/spotify/devices":
+            return {"ok": True, "devices": []}
         raise AssertionError(path)
 
     def _post(self, path, payload, timeout):

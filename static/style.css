@@ -220,7 +220,6 @@ h1 {
 .spotify-controls .cover-cmd { min-width: 52px; min-height: 42px; }
 .spotify-label { display: block; margin-top: 0.7rem; font-size: 0.85rem; font-weight: 700; color: var(--text-soft); }
 .spotify-select, .spotify-schedule input { width: 100%; min-height: 38px; padding: 0.45rem; border: 1px solid var(--tile-border); border-radius: 8px; background: rgba(255,252,246,.82); font: inherit; }
-.spotify-schedule { display: grid; gap: 0.55rem; margin-top: 1rem; padding-top: 0.8rem; border-top: 1px solid var(--panel-border); }.spotify-schedule h3 { margin: 0; }.spotify-schedule label { color: var(--text-soft); }
 
 h2 {
   margin: 0;

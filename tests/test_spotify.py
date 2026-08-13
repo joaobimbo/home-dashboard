@@ -1,7 +1,6 @@
 import os, tempfile, unittest
 from unittest import mock
 from modules.spotify.controller import SpotifyController
-from modules.spotify.schedules import SpotifyScheduleStore
 
 class Response:
  def __init__(self,status=204,data=None,headers=None): self.status_code=status;self._data=data or {};self.content=b'x' if data is not None else b'';self.headers=headers or {};self.ok=status<400
@@ -18,6 +17,3 @@ class SpotifyTests(unittest.TestCase):
   with mock.patch('modules.spotify.controller.requests.request',return_value=Response(200,{})): self.assertIsNone(self.c.status()['track'])
  def test_rate_limit(self):
   with mock.patch('modules.spotify.controller.requests.request',return_value=Response(429,headers={'Retry-After':'12'})): self.assertIn('12',self.c.devices()['error'])
- def test_schedule_requires_uri_and_time(self):
-  store=SpotifyScheduleStore(self.c,tempfile.mktemp())
-  with self.assertRaises(ValueError):store.add({'uri':'bad','at':'7','device_id':'x'})

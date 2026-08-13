@@ -26,6 +26,11 @@ ACTION_SCHEMA = {
                 "ac_mode",
                 "ac_setpoint",
                 "ac_fan",
+                "spotify_play_uri",
+                "spotify_play_playlist",
+                "spotify_pause",
+                "spotify_next",
+                "spotify_previous",
             ],
         },
         "parameters": {
@@ -46,6 +51,8 @@ ACTION_SCHEMA = {
                 "color_temp": {"type": ["integer", "null"]},
                 "temperature": {"type": ["number", "null"]},
                 "speed": {"type": ["string", "null"]},
+                "uri": {"type": ["string", "null"]},
+                "query": {"type": ["string", "null"]},
             },
             "required": [
                 "state",
@@ -57,6 +64,8 @@ ACTION_SCHEMA = {
                 "color_temp",
                 "temperature",
                 "speed",
+                "uri",
+                "query",
             ],
         },
     },
@@ -289,6 +298,9 @@ position(device,position=0..100);
 rgbcct(device,state?,level?,mode?,rgb=[red,green,blue]?,color_temp?);
 ac_mode(device,mode=auto|cool|heat|dry|fan);
 ac_setpoint(device,temperature=10..32); ac_fan(device,speed=auto|low|mid|high).
+spotify_play_uri(output,uri=spotify:playlist:/album:/track:); spotify_pause(output);
+spotify_next(output); spotify_previous(output). Use Spotify output tokens only.
+For a named playlist, use spotify_play_playlist(output,query=playlist name); it resolves one playlist server-side.
 
 RGB components must be integer JSON arrays from 0 to 255, for example green is
 [0,255,0], never a hex string. Include state="on" when asked to set a colour.

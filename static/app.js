@@ -1472,12 +1472,6 @@
 
   if (spotifyDevice) { spotifyDevice.addEventListener("change", function () { spotifyPost("/api/spotify/device", {device_id: spotifyDevice.value}); }); }
   if (spotifyVolume) { spotifyVolume.addEventListener("change", function () { spotifyPost("/api/spotify/volume", {volume: parseInt(spotifyVolume.value, 10), device_id: spotifyDevice ? spotifyDevice.value : null}); }); }
-  if (document.getElementById("spotify-schedule-form")) {
-    document.getElementById("spotify-schedule-form").addEventListener("submit", function (event) {
-      event.preventDefault();
-      spotifyPost("/api/spotify/schedules", {name: document.getElementById("spotify-schedule-name").value, uri: document.getElementById("spotify-schedule-uri").value, at: document.getElementById("spotify-schedule-time").value, daily: document.getElementById("spotify-schedule-daily").checked, date: document.getElementById("spotify-schedule-date").value, device_id: spotifyDevice ? spotifyDevice.value : ""});
-    });
-  }
 
   tickClock();
   setInterval(tickClock, 1000);

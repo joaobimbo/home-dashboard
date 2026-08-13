@@ -111,15 +111,6 @@
               <select id="spotify-device" class="spotify-select"></select>
               <label class="spotify-label" for="spotify-volume">Volume <span id="spotify-volume-value">—</span></label>
               <input id="spotify-volume" class="cover-modal-slider" type="range" min="0" max="100" step="1" value="50">
-              <form id="spotify-schedule-form" class="spotify-schedule">
-                <h3>Agendar playlist</h3>
-                <input id="spotify-schedule-name" maxlength="80" placeholder="Manhã" aria-label="Nome">
-                <input id="spotify-schedule-uri" placeholder="spotify:playlist:..." aria-label="URI da playlist" required>
-                <input id="spotify-schedule-time" type="time" required>
-                <label><input id="spotify-schedule-daily" type="checkbox" checked> Todos os dias</label>
-                <input id="spotify-schedule-date" type="date" aria-label="Data">
-                <button type="submit" class="cover-modal-btn is-primary">Guardar agenda</button>
-              </form>
               <p id="spotify-message" class="spotify-message" hidden></p>
             </div>
           </div>
@@ -331,6 +322,6 @@
   <script>
     window.__CONFIGURED_DEVICES__ = {{ devices|tojson }};
   </script>
-  <script src="{{ url_for('static', filename='app.js', v='30') }}"></script>
+  <script src="{{ url_for('static', filename='app.js', v='31') }}"></script>
 </body>
 </html>

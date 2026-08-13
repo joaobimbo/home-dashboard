@@ -12,6 +12,7 @@ class PlanValidationError(ValueError):
 DEVICE_FIELDS = {
     "shelly": {"state", "brightness", "position", "mode", "color_temp"},
     "daikin": {"power", "mode", "setpoint", "current_temp", "fan_speed"},
+    "spotify": set(),
 }
 WEATHER_FIELDS = {"temp_c", "condition"}
 COMPARISON_OPERATORS = {"eq", "ne", "gt", "gte", "lt", "lte", "between"}
@@ -39,6 +40,8 @@ def _compact_parameters(parameters: object) -> Dict[str, object]:
         "color_temp",
         "temperature",
         "speed",
+        "uri",
+        "query",
     }
     _require(set(parameters).issubset(allowed), "Unknown action parameter")
     return {key: value for key, value in parameters.items() if value is not None}
@@ -88,6 +91,14 @@ def validate_action(
     elif operation == "ac_fan":
         _require(set(params) == {"speed"}, "Fan requires speed")
         _require(params["speed"] in {"auto", "low", "mid", "high"}, "Invalid fan speed")
+    elif operation == "spotify_play_uri":
+        _require(set(params) == {"uri"}, "Spotify playback requires a URI")
+        _require(isinstance(params["uri"], str) and params["uri"].startswith("spotify:"), "Invalid Spotify URI")
+    elif operation == "spotify_play_playlist":
+        _require(set(params) == {"query"}, "Spotify playlist playback requires a name")
+        _require(isinstance(params["query"], str) and 1 <= len(params["query"].strip()) <= 200, "Invalid Spotify playlist name")
+    elif operation in {"spotify_pause", "spotify_next", "spotify_previous"}:
+        _require(not params, "Spotify command does not accept parameters")
 
     return {
         "device_id": device["id"],

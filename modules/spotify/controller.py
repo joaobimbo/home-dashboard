@@ -128,3 +128,11 @@ class SpotifyController:
         body = {"uris": [uri]} if kind == "track" else {"context_uri": uri} if kind in {"album", "playlist"} else None
         if body is None: return {"ok": False, "error": "Only Spotify tracks, albums, and playlists are supported"}
         return self._api("PUT", "/me/player/play", params={"device_id": device_id} if device_id else None, json=body)
+
+    def play_playlist_query(self, query, device_id=None):
+        if not isinstance(query, str) or not query.strip(): return {"ok": False, "error": "A playlist name is required"}
+        result = self._api("GET", "/search", params={"q": query.strip(), "type": "playlist", "limit": 1})
+        if not result["ok"]: return result
+        items = result["data"].get("playlists", {}).get("items", [])
+        if not items or not items[0].get("uri"): return {"ok": False, "error": "Spotify could not find that playlist"}
+        return self.play_uri(items[0]["uri"], device_id)
