@@ -7,10 +7,7 @@ from flask import Flask, jsonify, render_template, request
 from modules.shelly import SceneStore, ShellyController
 from modules.daikin import DaikinController
 from modules.weather import get_weather
-from modules.agent.client import DashboardError
-from modules.agent.providers import ProviderError
-from modules.agent.validation import PlanValidationError
-from modules.agent.web import create_web_agent_from_environment
+from modules.agent.web import AgentBridgeClient, AgentBridgeError
 
 
 # The dashboard and automation agent poll several read-only endpoints. Keep
@@ -23,7 +20,7 @@ controller = ShellyController.from_sources()
 scene_store = SceneStore()
 daikin_controller = DaikinController.from_sources()
 daikin_controller.start_background_polling()
-web_agent = create_web_agent_from_environment()
+web_agent = AgentBridgeClient(os.environ.get("AGENT_WEB_URL", "http://127.0.0.1:5001"))
 
 
 @app.route("/")
@@ -39,7 +36,7 @@ def index():
         devices=configured,
         daikin_devices=daikin_devices,
         rooms=rooms,
-        web_agent_available=web_agent is not None,
+        web_agent_available=True,
     )
 
 
@@ -75,26 +72,22 @@ def _web_agent_response(payload, browser_id, status_code=200):
 
 @app.route("/api/agent/request", methods=["POST"])
 def agent_request():
-    if web_agent is None:
-        return jsonify({"ok": False, "error": "The web agent is not configured on this server"}), 503
     browser_id = _web_agent_browser_id()
     try:
         payload = request.get_json(silent=True) or {}
         return _web_agent_response(web_agent.submit(payload.get("message"), browser_id), browser_id)
-    except (ValueError, DashboardError, ProviderError, PlanValidationError) as exc:
-        return _web_agent_response({"ok": False, "error": str(exc)}, browser_id, 400)
+    except (ValueError, AgentBridgeError) as exc:
+        return _web_agent_response({"ok": False, "error": str(exc)}, browser_id, 503)
 
 
 @app.route("/api/agent/confirm", methods=["POST"])
 def agent_confirm():
-    if web_agent is None:
-        return jsonify({"ok": False, "error": "The web agent is not configured on this server"}), 503
     browser_id = _web_agent_browser_id()
     try:
         payload = request.get_json(silent=True) or {}
         return _web_agent_response(web_agent.confirm(payload.get("token"), browser_id), browser_id)
-    except (ValueError, DashboardError, ProviderError, PlanValidationError) as exc:
-        return _web_agent_response({"ok": False, "error": str(exc)}, browser_id, 400)
+    except (ValueError, AgentBridgeError) as exc:
+        return _web_agent_response({"ok": False, "error": str(exc)}, browser_id, 503)
 
 
 @app.route("/api/shelly/devices")

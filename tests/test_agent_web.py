@@ -1,6 +1,12 @@
 import unittest
 
-from modules.agent.web import WebAgent
+try:
+    import flask  # noqa: F401
+    FLASK_AVAILABLE = True
+except ImportError:
+    FLASK_AVAILABLE = False
+
+from modules.agent.web import WebAgent, create_agent_bridge_app
 
 
 CATALOG = [
@@ -121,3 +127,31 @@ class WebAgentTests(unittest.TestCase):
             agent.confirm(preview["token"], "browser-2")
         saved = agent.confirm(preview["token"], "browser-1")
         self.assertEqual(saved["kind"], "automation_saved")
+
+    @unittest.skipUnless(FLASK_AVAILABLE, "Flask is not installed")
+    def test_private_bridge_forwards_a_browser_bound_request(self):
+        agent = WebAgent(
+            FakeProvider(
+                {
+                    "kind": "direct_actions",
+                    "actions": [
+                        {"device": "S1", "operation": "power", "parameters": {"state": "on"}}
+                    ],
+                }
+            ),
+            "test",
+            "test-model",
+            FakeClient(),
+            FakeStore(),
+            "Europe/Lisbon",
+        )
+        client = create_agent_bridge_app(agent).test_client()
+
+        response = client.post(
+            "/request",
+            json={"message": "Turn on desk light"},
+            headers={"X-Home-Dashboard-Browser": "browser-1"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["message"], "Desk light: state=on")

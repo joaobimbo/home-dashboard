@@ -1,10 +1,13 @@
 """Synchronous web adapter for the validated home-automation agent."""
 
 import hashlib
+import json
 import logging
+import threading
 import time
 import uuid
-from typing import Dict, Optional
+from typing import Dict
+from urllib import error, parse, request
 
 from .client import DashboardClient, DashboardError
 from .providers import LanguageProvider, ProviderError
@@ -16,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class WebAgent:
-    """Run the agent from the local dashboard without exposing provider keys."""
+    """Run web requests through the agent without exposing provider keys."""
 
     def __init__(
         self,
@@ -35,13 +38,15 @@ class WebAgent:
         self.timezone_name = timezone_name
         self._pending: Dict[str, Dict[str, object]] = {}
         self._clarifications: Dict[str, Dict[str, object]] = {}
+        self._lock = threading.RLock()
 
     def submit(self, message: object, browser_id: str) -> Dict[str, object]:
         text = str(message or "").strip()
         if not 1 <= len(text) <= 1000:
             raise ValueError("Enter a request of up to 1000 characters")
 
-        previous = self._clarifications.pop(browser_id, None)
+        with self._lock:
+            previous = self._clarifications.pop(browser_id, None)
         prompt = text
         if previous and float(previous["expires_at"]) > time.monotonic():
             prompt = (
@@ -69,12 +74,13 @@ class WebAgent:
 
     def confirm(self, token: object, browser_id: str) -> Dict[str, object]:
         token = str(token or "")
-        pending = self._pending.get(token)
-        if not pending or float(pending["expires_at"]) < time.monotonic():
-            raise ValueError("This confirmation expired")
-        if pending["browser_id"] != browser_id:
-            raise ValueError("This confirmation belongs to another browser")
-        self._pending.pop(token, None)
+        with self._lock:
+            pending = self._pending.get(token)
+            if not pending or float(pending["expires_at"]) < time.monotonic():
+                raise ValueError("This confirmation expired")
+            if pending["browser_id"] != browser_id:
+                raise ValueError("This confirmation belongs to another browser")
+            self._pending.pop(token, None)
 
         replace_id = pending.get("replace_rule_id")
         if replace_id:
@@ -88,11 +94,12 @@ class WebAgent:
     def _handle_plan(self, plan: Dict[str, object], original: str, browser_id: str) -> Dict[str, object]:
         kind = plan["kind"]
         if kind == "clarification":
-            self._clarifications[browser_id] = {
-                "request": original,
-                "question": plan["question"],
-                "expires_at": time.monotonic() + 10 * 60,
-            }
+            with self._lock:
+                self._clarifications[browser_id] = {
+                    "request": original,
+                    "question": plan["question"],
+                    "expires_at": time.monotonic() + 10 * 60,
+                }
             return {"ok": True, "kind": kind, "message": plan["question"]}
         if kind == "unsupported":
             return {"ok": True, "kind": kind, "message": plan.get("reply") or "That request is outside home control."}
@@ -115,12 +122,13 @@ class WebAgent:
             None,
         )
         token = uuid.uuid4().hex
-        self._pending[token] = {
-            "browser_id": browser_id,
-            "automation": automation,
-            "replace_rule_id": existing["id"] if existing else None,
-            "expires_at": time.monotonic() + 10 * 60,
-        }
+        with self._lock:
+            self._pending[token] = {
+                "browser_id": browser_id,
+                "automation": automation,
+                "replace_rule_id": existing["id"] if existing else None,
+                "expires_at": time.monotonic() + 10 * 60,
+            }
         message = self._format_automation(automation)
         if plan.get("assumptions"):
             message += "\nAssumptions: " + "; ".join(plan["assumptions"])
@@ -155,27 +163,86 @@ class WebAgent:
         return "\n".join(line for line in lines if line)
 
 
-def create_web_agent_from_environment() -> Optional[WebAgent]:
-    """Create the optional web adapter when the LLM settings are available."""
-    import os
-    from pathlib import Path
+class AgentBridgeError(RuntimeError):
+    pass
 
-    from .providers import create_provider
 
-    provider_name = os.environ.get("LLM_PROVIDER", "").strip().lower()
-    model = os.environ.get("LLM_MODEL", "").strip()
-    key_names = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY", "claude": "ANTHROPIC_API_KEY", "google": "GEMINI_API_KEY", "gemini": "GEMINI_API_KEY"}
-    key_name = key_names.get(provider_name)
-    api_key = os.environ.get(key_name, "").strip() if key_name else ""
-    if not provider_name or not model or not api_key:
-        return None
-    timezone_name = os.environ.get("AGENT_TIMEZONE", "Europe/Lisbon")
-    data_dir = os.environ.get("AGENT_DATA_DIR", str(Path(__file__).resolve().parents[2] / "var" / "agent"))
-    return WebAgent(
-        create_provider(provider_name, model, api_key, timezone_name),
-        provider_name,
-        model,
-        DashboardClient(os.environ.get("DASHBOARD_URL", "http://127.0.0.1:5000")),
-        AutomationStore(data_dir),
-        timezone_name,
-    )
+class AgentBridgeClient:
+    """Dashboard-side client for the localhost-only agent bridge."""
+
+    def __init__(self, base_url: str = "http://127.0.0.1:5001"):
+        parsed = parse.urlparse(base_url)
+        if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+            raise ValueError("Agent bridge must use HTTP on the local host")
+        self.base_url = base_url.rstrip("/")
+
+    def submit(self, message: object, browser_id: str) -> Dict[str, object]:
+        return self._post("/request", {"message": message}, browser_id)
+
+    def confirm(self, token: object, browser_id: str) -> Dict[str, object]:
+        return self._post("/confirm", {"token": token}, browser_id)
+
+    def _post(self, path: str, payload: Dict[str, object], browser_id: str) -> Dict[str, object]:
+        req = request.Request(
+            self.base_url + path,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "X-Home-Dashboard-Browser": browser_id},
+            method="POST",
+        )
+        try:
+            with request.urlopen(req, timeout=75) as response:
+                result = json.loads(response.read().decode("utf-8"))
+        except error.HTTPError as exc:
+            try:
+                result = json.loads(exc.read().decode("utf-8"))
+                message = result.get("error") if isinstance(result, dict) else None
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                message = None
+            raise AgentBridgeError(str(message or "Agent request failed")) from exc
+        except (error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            raise AgentBridgeError("Agent service is unavailable") from exc
+        if not isinstance(result, dict):
+            raise AgentBridgeError("Agent service returned an invalid response")
+        return result
+
+
+def create_agent_bridge_app(web_agent: WebAgent):
+    """Create the agent's private HTTP bridge, bound to loopback by its runner."""
+    from flask import Flask, jsonify, request as flask_request
+
+    app = Flask(__name__)
+
+    def browser_id():
+        value = flask_request.headers.get("X-Home-Dashboard-Browser", "")
+        if not value or len(value) > 100:
+            raise ValueError("Invalid browser session")
+        return value
+
+    @app.post("/request")
+    def submit():
+        try:
+            payload = flask_request.get_json(silent=True) or {}
+            return jsonify(web_agent.submit(payload.get("message"), browser_id()))
+        except (ValueError, DashboardError, ProviderError, PlanValidationError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+    @app.post("/confirm")
+    def confirm():
+        try:
+            payload = flask_request.get_json(silent=True) or {}
+            return jsonify(web_agent.confirm(payload.get("token"), browser_id()))
+        except (ValueError, DashboardError, ProviderError, PlanValidationError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+    return app
+
+
+def start_agent_bridge(web_agent: WebAgent, port: int = 5001):
+    """Start a threaded agent bridge on loopback and return its WSGI server."""
+    from werkzeug.serving import make_server
+
+    server = make_server("127.0.0.1", port, create_agent_bridge_app(web_agent), threaded=True)
+    thread = threading.Thread(target=server.serve_forever, name="agent-web-bridge", daemon=True)
+    thread.start()
+    logger.info("agent_web_bridge_started host=127.0.0.1 port=%d", port)
+    return server
