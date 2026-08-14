@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import threading
 import time
@@ -9,6 +10,7 @@ from typing import Dict, List, Optional
 
 MODES = ("auto", "cool", "heat", "dry", "fan")
 FAN_SPEEDS = ("auto", "low", "mid", "high")
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -206,7 +208,7 @@ class DaikinController:
         async def action(madoka, lib):
             return await self._query_status_payload(madoka)
 
-        return self._run(device, action)
+        return self._run(device, action, "status")
 
     def get_cached_status(self, device_id: str):
         device = self._require_device(device_id)
@@ -230,14 +232,25 @@ class DaikinController:
             while True:
                 for device in self.devices:
                     try:
-                        self.get_status(device.id)
+                        result = self.get_status(device.id)
+                        if not result.get("ok"):
+                            logger.warning(
+                                "daikin_background_poll_failed device_id=%s device_name=%r error=%s",
+                                device.id,
+                                device.name,
+                                result.get("error", "unknown error"),
+                            )
                     except Exception:
                         # _run() already turns BLE failures into a normal
                         # {"ok": False, ...} result, but this thread has no
                         # supervisor to restart it - an unexpected exception
                         # here must not silently end background polling for
                         # every device forever.
-                        pass
+                        logger.exception(
+                            "daikin_background_poll_crashed device_id=%s device_name=%r",
+                            device.id,
+                            device.name,
+                        )
                 time.sleep(self._poll_interval)
 
         thread = threading.Thread(target=loop, daemon=True)
@@ -252,7 +265,7 @@ class DaikinController:
             await madoka.power_state.update(lib["PowerStateStatus"](on))
             return await self._query_status_payload(madoka)
 
-        return self._run(device, action)
+        return self._run(device, action, "power")
 
     def set_mode(self, device_id: str, mode: str):
         device = self._require_device(device_id)
@@ -268,7 +281,7 @@ class DaikinController:
             )
             return await self._query_status_payload(madoka)
 
-        return self._run(device, action)
+        return self._run(device, action, "mode")
 
     def set_setpoint(self, device_id: str, temperature: float):
         device = self._require_device(device_id)
@@ -284,7 +297,7 @@ class DaikinController:
             )
             return await self._query_status_payload(madoka)
 
-        return self._run(device, action)
+        return self._run(device, action, "setpoint")
 
     def set_fan_speed(self, device_id: str, speed: str):
         device = self._require_device(device_id)
@@ -300,7 +313,7 @@ class DaikinController:
             )
             return await self._query_status_payload(madoka)
 
-        return self._run(device, action)
+        return self._run(device, action, "fan_speed")
 
     # -- internals -----------------------------------------------------
 
@@ -345,13 +358,21 @@ class DaikinController:
         if not loop_ready.wait(timeout=5.0):
             raise DaikinControllerError("Could not start the Daikin BLE event loop")
 
-    def _run(self, device: DaikinDevice, action):
+    def _run(self, device: DaikinDevice, action, operation: str):
         try:
             lib = _load_pymadoka()
         except DaikinControllerError as exc:
+            logger.warning(
+                "daikin_operation_failed operation=%s device_id=%s device_name=%r error=%s",
+                operation, device.id, device.name, exc,
+            )
             return {"ok": False, "id": device.id, "name": device.name, "error": str(exc)}
 
         if not self._ble_lock.acquire(timeout=self._ble_lock_timeout):
+            logger.warning(
+                "daikin_operation_busy operation=%s device_id=%s device_name=%r lock_timeout_seconds=%s",
+                operation, device.id, device.name, self._ble_lock_timeout,
+            )
             return {
                 "ok": False,
                 "id": device.id,
@@ -455,8 +476,17 @@ class DaikinController:
                 # every browser tab.
                 with self._status_cache_lock:
                     self._status_cache[device.id] = result
+            else:
+                logger.warning(
+                    "daikin_operation_failed operation=%s device_id=%s device_name=%r error=%s",
+                    operation, device.id, device.name, result.get("error", "unknown error"),
+                )
             return result
         except Exception as exc:
+            logger.exception(
+                "daikin_operation_failed operation=%s device_id=%s device_name=%r error=%s",
+                operation, device.id, device.name, exc,
+            )
             return {
                 "ok": False,
                 "id": device.id,

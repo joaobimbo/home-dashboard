@@ -4,6 +4,7 @@ import subprocess
 import uuid
 
 from flask import Flask, jsonify, render_template, request
+from werkzeug.exceptions import HTTPException
 from modules.shelly import SceneStore, ShellyController
 from modules.daikin import DaikinController
 from modules.weather import get_weather
@@ -23,6 +24,35 @@ daikin_controller = DaikinController.from_sources()
 daikin_controller.start_background_polling()
 web_agent = AgentBridgeClient(os.environ.get("AGENT_WEB_URL", "http://127.0.0.1:5001"))
 spotify = SpotifyController()
+
+
+@app.after_request
+def log_failed_request(response):
+    """Keep actionable failed requests visible in journalctl without 200 noise."""
+    if response.status_code >= 400:
+        payload = response.get_json(silent=True)
+        error_message = payload.get("error") if isinstance(payload, dict) else None
+        app.logger.warning(
+            "request_failed method=%s path=%s status=%s error=%s",
+            request.method,
+            request.path,
+            response.status_code,
+            error_message or response.status,
+        )
+    return response
+
+
+@app.errorhandler(Exception)
+def log_unhandled_exception(exc):
+    if isinstance(exc, HTTPException):
+        return exc
+    app.logger.exception(
+        "request_crashed method=%s path=%s error=%s",
+        request.method,
+        request.path,
+        exc,
+    )
+    return jsonify({"ok": False, "error": "Unexpected server error; check dashboard logs"}), 500
 
 
 @app.route("/")
