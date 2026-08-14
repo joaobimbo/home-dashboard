@@ -22,6 +22,50 @@ logger = logging.getLogger(__name__)
 RULE_MENU_PAGE_SIZE = 8
 
 
+def _direct_spotify_transfer_plan(message: str, catalog):
+    """Resolve an immediate, unambiguous request to move Spotify by room."""
+    text = str(message or "").casefold().replace("’", "'")
+    if not any(word in text for word in ("música", "musica", "spotify")):
+        return None
+    if not any(word in text for word in ("passa", "passar", "move", "mover", "transfer")):
+        return None
+    # Let the model handle scheduled or otherwise compound requests.
+    if any(word in text for word in ("amanhã", "amanha", "tomorrow", "daqui", "every", "todos os")):
+        return None
+
+    room = None
+    if "google home mini" in text or "quarto" in text or "bedroom" in text:
+        room = "Quarto"
+    elif "ana's echo" in text or "anas echo" in text or "ana echo" in text or any(word in text for word in ("sala", "cozinha", "living room", "kitchen")):
+        room = "Sala/Cozinha"
+    elif any(word in text for word in ("escritorio", "escritório", "office", "librespot", "server pc")):
+        room = "Escritorio"
+    if not room:
+        return None
+
+    outputs = [
+        item for item in catalog
+        if item.get("kind") == "spotify" and item.get("component") == "speaker" and item.get("room") == room
+    ]
+    if len(outputs) != 1:
+        return {
+            "kind": "clarification",
+            "reply": "",
+            "question": f"The Spotify output for {room} is unavailable.",
+            "assumptions": [],
+            "actions": [],
+            "automation": None,
+        }
+    return {
+        "kind": "direct_actions",
+        "reply": "",
+        "question": "",
+        "assumptions": [],
+        "actions": [{"device": outputs[0]["token"], "operation": "spotify_transfer", "parameters": {}}],
+        "automation": None,
+    }
+
+
 class TelegramAgent:
     def __init__(
         self,
@@ -370,27 +414,31 @@ class TelegramAgent:
                 request_id,
                 len(catalog),
             )
-            safety_id = hashlib.sha256(
-                f"telegram:{update.effective_user.id}".encode("utf-8")
-            ).hexdigest()[:32]
-            stage = "provider"
-            logger.info(
-                "provider_started request_id=%s provider=%s model=%s",
-                request_id,
-                self.provider_name,
-                self.provider_model,
-            )
-            raw = await asyncio.to_thread(
-                self.provider.interpret,
-                message,
-                catalog,
-                safety_id,
-            )
-            logger.info(
-                "provider_completed request_id=%s proposed_kind=%s",
-                request_id,
-                str(raw.get("kind")) if isinstance(raw, dict) else "invalid",
-            )
+            raw = _direct_spotify_transfer_plan(message, catalog)
+            if raw is not None:
+                logger.info("spotify_transfer_resolved request_id=%s", request_id)
+            else:
+                safety_id = hashlib.sha256(
+                    f"telegram:{update.effective_user.id}".encode("utf-8")
+                ).hexdigest()[:32]
+                stage = "provider"
+                logger.info(
+                    "provider_started request_id=%s provider=%s model=%s",
+                    request_id,
+                    self.provider_name,
+                    self.provider_model,
+                )
+                raw = await asyncio.to_thread(
+                    self.provider.interpret,
+                    message,
+                    catalog,
+                    safety_id,
+                )
+                logger.info(
+                    "provider_completed request_id=%s proposed_kind=%s",
+                    request_id,
+                    str(raw.get("kind")) if isinstance(raw, dict) else "invalid",
+                )
             stage = "validation"
             plan = validate_interpretation(raw, catalog, message)
             logger.info(

@@ -3,7 +3,24 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest import mock
 
-from modules.agent.bot import TelegramAgent
+from modules.agent.bot import TelegramAgent, _direct_spotify_transfer_plan
+
+
+SPOTIFY_CATALOG = [
+    {"token": "P1", "kind": "spotify", "component": "speaker", "room": "Quarto"},
+    {"token": "P2", "kind": "spotify", "component": "speaker", "room": "Escritorio"},
+]
+
+
+class SpotifyTransferResolutionTests(unittest.TestCase):
+    def test_resolves_bedroom_transfer_without_calling_the_model(self):
+        plan = _direct_spotify_transfer_plan("Passa a música para o quarto", SPOTIFY_CATALOG)
+        self.assertEqual(plan["actions"][0]["device"], "P1")
+
+    def test_reports_an_unavailable_bedroom_output(self):
+        plan = _direct_spotify_transfer_plan("Passa a música para o quarto", SPOTIFY_CATALOG[1:])
+        self.assertEqual(plan["kind"], "clarification")
+        self.assertIn("Quarto", plan["question"])
 
 
 class TelegramAccessTests(unittest.TestCase):
