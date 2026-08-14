@@ -3,12 +3,17 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest import mock
 
-from modules.agent.bot import TelegramAgent, _direct_spotify_transfer_plan
+from modules.agent.bot import (
+    TelegramAgent,
+    _clarification_candidates,
+    _direct_spotify_transfer_plan,
+)
 
 
 SPOTIFY_CATALOG = [
-    {"token": "P1", "kind": "spotify", "component": "speaker", "room": "Quarto"},
-    {"token": "P2", "kind": "spotify", "component": "speaker", "room": "Escritorio"},
+    {"token": "P1", "kind": "spotify", "component": "speaker", "room": "Quarto", "capabilities": ["spotify_transfer"]},
+    {"token": "P2", "kind": "spotify", "component": "speaker", "room": "Escritorio", "capabilities": ["spotify_transfer"]},
+    {"token": "P3", "kind": "spotify", "component": "speaker", "room": "Sala/Cozinha", "capabilities": ["spotify_transfer"]},
 ]
 
 
@@ -21,6 +26,28 @@ class SpotifyTransferResolutionTests(unittest.TestCase):
         plan = _direct_spotify_transfer_plan("Passa a música para o quarto", SPOTIFY_CATALOG[1:])
         self.assertEqual(plan["kind"], "clarification")
         self.assertIn("Quarto", plan["question"])
+
+    def test_follow_up_room_is_resolved_from_the_answer_not_the_original_request(self):
+        plan = _direct_spotify_transfer_plan("Passa a música para a sala", SPOTIFY_CATALOG)
+        self.assertEqual(plan["actions"][0]["device"], "P3")
+
+
+class ClarificationChoiceTests(unittest.TestCase):
+    def test_music_clarification_only_offers_live_speakers(self):
+        catalog = SPOTIFY_CATALOG + [
+            {"token": "S1", "kind": "shelly", "component": "switch", "room": "Quarto", "capabilities": ["power"]},
+            {"token": "P0", "kind": "spotify", "component": "playback", "room": "Casa", "capabilities": ["spotify_pause"]},
+        ]
+        choices = _clarification_candidates("Toca música", catalog)
+        self.assertEqual([item["token"] for item in choices], ["P1", "P2", "P3"])
+
+    def test_blind_clarification_only_offers_covers(self):
+        catalog = [
+            {"token": "S1", "kind": "shelly", "component": "cover", "room": "Quarto", "capabilities": ["cover"]},
+            {"token": "S2", "kind": "shelly", "component": "switch", "room": "Quarto", "capabilities": ["power"]},
+        ]
+        choices = _clarification_candidates("Abre os estores", catalog)
+        self.assertEqual([item["token"] for item in choices], ["S1"])
 
 
 class TelegramAccessTests(unittest.TestCase):

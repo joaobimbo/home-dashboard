@@ -66,6 +66,21 @@ def _direct_spotify_transfer_plan(message: str, catalog):
     }
 
 
+def _clarification_candidates(message: str, catalog):
+    """Offer relevant, executable device choices for a clarification."""
+    text = str(message or "").casefold()
+    candidates = [item for item in catalog if any(capability != "status" for capability in item.get("capabilities", []))]
+    if any(word in text for word in ("música", "musica", "spotify")):
+        candidates = [item for item in candidates if item.get("kind") == "spotify" and item.get("component") == "speaker"]
+    elif any(word in text for word in ("estore", "estores", "blind", "blinds")):
+        candidates = [item for item in candidates if item.get("component") == "cover"]
+    elif any(word in text for word in ("ar condicionado", " ac", "air conditioning")):
+        candidates = [item for item in candidates if item.get("kind") == "daikin"]
+    elif any(word in text for word in ("luz", "luzes", "light", "lights")):
+        candidates = [item for item in candidates if item.get("kind") == "shelly"]
+    return candidates[:16]
+
+
 class TelegramAgent:
     def __init__(
         self,
@@ -414,7 +429,7 @@ class TelegramAgent:
                 request_id,
                 len(catalog),
             )
-            raw = _direct_spotify_transfer_plan(message, catalog)
+            raw = _direct_spotify_transfer_plan(incoming_message, catalog)
             if raw is not None:
                 logger.info("spotify_transfer_resolved request_id=%s", request_id)
             else:
@@ -440,7 +455,7 @@ class TelegramAgent:
                     str(raw.get("kind")) if isinstance(raw, dict) else "invalid",
                 )
             stage = "validation"
-            plan = validate_interpretation(raw, catalog, message)
+            plan = validate_interpretation(raw, catalog, incoming_message)
             logger.info(
                 "plan_validated request_id=%s kind=%s plan=%r",
                 request_id,
@@ -457,7 +472,7 @@ class TelegramAgent:
             )
             await self._update_progress(progress, self._progress_text(plan))
             stage = "handling"
-            await self._handle_plan(update, plan, message)
+            await self._handle_plan(update, plan, incoming_message)
         except (DashboardError, ProviderError, PlanValidationError) as exc:
             if stage == "validation":
                 logger.warning(
@@ -526,7 +541,7 @@ class TelegramAgent:
                 "question": plan["question"],
                 "expires_at": time.monotonic() + 10 * 60,
             }
-            await update.effective_message.reply_text(str(plan["question"]))
+            await self._send_clarification_choices(update, original, str(plan["question"]))
             return
         if kind == "unsupported":
             await update.effective_message.reply_text(plan.get("reply") or "That request is outside home control.")
@@ -602,6 +617,9 @@ class TelegramAgent:
         if not query or not self._allowed(update):
             return
         parts = str(query.data or "").split(":")
+        if len(parts) == 3 and parts[:2] == ["agent", "clarify"]:
+            await self._clarification_select_callback(update, query, parts[2])
+            return
         if len(parts) == 3 and parts[:2] == ["agent", "power"]:
             await self._power_select_callback(update, query, parts[2])
             return
@@ -664,6 +682,73 @@ class TelegramAgent:
                 await query.edit_message_text(f"Deleted automation '{rule['name']}'.")
             except KeyError:
                 await query.edit_message_text("That automation no longer exists.")
+
+    async def _send_clarification_choices(self, update, original: str, question: str):
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+        try:
+            catalog = await asyncio.to_thread(self.client.catalog)
+        except DashboardError:
+            await update.effective_message.reply_text(question)
+            return
+        candidates = _clarification_candidates(original, catalog)
+        if not candidates:
+            await update.effective_message.reply_text(question)
+            return
+        rows = []
+        for device in candidates:
+            answer = "Use {name} in {room}.".format(
+                name=device.get("display_name") or "this device",
+                room=device.get("room") or "Casa",
+            )
+            token = self._new_pending(
+                "clarification_choice",
+                update,
+                {"request": original, "question": question, "answer": answer},
+            )
+            rows.append([
+                InlineKeyboardButton(
+                    "{name} · {room}".format(
+                        name=device.get("display_name") or "Device",
+                        room=device.get("room") or "Casa",
+                    ),
+                    callback_data=f"agent:clarify:{token}",
+                )
+            ])
+        await update.effective_message.reply_text(
+            question + "\n\nChoose an option:",
+            reply_markup=InlineKeyboardMarkup(rows),
+        )
+
+    async def _clarification_select_callback(self, update, query, token: str):
+        pending = self._pending.pop(token, None)
+        if not pending or float(pending["expires_at"]) < time.monotonic():
+            await query.answer()
+            await query.edit_message_text("This choice expired. Please send the request again.")
+            return
+        if (
+            pending.get("kind") != "clarification_choice"
+            or int(pending["user_id"]) != int(update.effective_user.id)
+            or int(pending["chat_id"]) != int(update.effective_chat.id)
+        ):
+            self._pending[token] = pending
+            await query.answer("Only the person who requested this can choose.", show_alert=True)
+            return
+        await query.answer()
+        payload = pending["payload"]
+        prompt = "Original request: {request}\nClarifying question: {question}\nUser answer: {answer}".format(**payload)
+        await query.edit_message_text("Choice selected. Applying it…")
+        try:
+            catalog = await asyncio.to_thread(self.client.catalog)
+            safety_id = hashlib.sha256(
+                f"telegram:{update.effective_user.id}".encode("utf-8")
+            ).hexdigest()[:32]
+            raw = await asyncio.to_thread(self.provider.interpret, prompt, catalog, safety_id)
+            plan = validate_interpretation(raw, catalog, str(payload["answer"]))
+            await self._handle_plan(update, plan, str(payload["request"]))
+        except (DashboardError, ProviderError, PlanValidationError) as exc:
+            logger.warning("clarification_choice_failed error=%s", exc)
+            await update.effective_message.reply_text(f"I couldn't safely carry that out: {exc}")
 
     async def _send_power_menu(self, update, desired_state: str):
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
