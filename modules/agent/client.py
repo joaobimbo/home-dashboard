@@ -9,6 +9,19 @@ class DashboardError(RuntimeError):
     pass
 
 
+def _spotify_output_location(name: object):
+    """Return the household location metadata for a live Connect output."""
+    label = str(name or "Spotify output")
+    normalized = label.casefold().replace("’", "'")
+    if "google home mini" in normalized:
+        return "Quarto", ["bedroom", "quarto", "Google Home Mini"]
+    if "ana's echo" in normalized or "anas echo" in normalized or "ana echo" in normalized:
+        return "Sala/Cozinha", ["sala", "cozinha", "living room", "kitchen", "Ana's Echo"]
+    if normalized in {"escritorio", "escritório"} or "librespot" in normalized or "server pc" in normalized:
+        return "Escritorio", ["escritorio", "escritório", "office", "server PC", "librespot"]
+    return "Casa", []
+
+
 class DashboardClient:
     def __init__(self, base_url: str = "http://127.0.0.1:5000"):
         parsed = parse.urlparse(base_url)
@@ -75,10 +88,12 @@ class DashboardClient:
             for index, device in enumerate(spotify.get("devices", []), 1):
                 if not isinstance(device, dict) or not device.get("id"):
                     continue
+                display_name = str(device.get("name") or "Spotify output")
+                room, other_names = _spotify_output_location(display_name)
                 result.append({
                     "token": f"P{index}", "id": str(device["id"]), "kind": "spotify",
-                    "component": "speaker", "display_name": str(device.get("name") or "Spotify output"),
-                    "other_names": [], "room": "Casa",
+                    "component": "speaker", "display_name": display_name,
+                    "other_names": other_names, "room": room,
                     "capabilities": ["spotify_transfer", "spotify_play_uri", "spotify_play_playlist", "spotify_pause", "spotify_next", "spotify_previous"],
                 })
         return result

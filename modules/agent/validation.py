@@ -28,6 +28,32 @@ def _device_index(catalog: List[Dict[str, object]]) -> Dict[str, Dict[str, objec
     return {str(item["token"]): item for item in catalog}
 
 
+def _requested_spotify_room(request_text: object) -> Optional[str]:
+    text = str(request_text or "").casefold()
+    if "quarto" in text or "bedroom" in text:
+        return "Quarto"
+    if "escritorio" in text or "escritório" in text or "office" in text:
+        return "Escritorio"
+    if "cozinha" in text or "kitchen" in text or "sala" in text or "living room" in text:
+        return "Sala/Cozinha"
+    return None
+
+
+def _validate_spotify_room(actions: List[Dict[str, object]], catalog: List[Dict[str, object]], request_text: object):
+    requested_room = _requested_spotify_room(request_text)
+    if not requested_room:
+        return
+    device_by_id = {str(item["id"]): item for item in catalog}
+    for action in actions:
+        if action["operation"] not in {"spotify_transfer", "spotify_play_uri", "spotify_play_playlist"}:
+            continue
+        device = device_by_id.get(str(action["device_id"]))
+        _require(
+            device is not None and device.get("room") == requested_room,
+            f"Requested Spotify output in {requested_room} is unavailable",
+        )
+
+
 def _compact_parameters(parameters: object) -> Dict[str, object]:
     _require(isinstance(parameters, dict), "Action parameters must be an object")
     allowed = {
@@ -229,6 +255,7 @@ def _valid_hhmm(value: str) -> bool:
 def validate_interpretation(
     raw: object,
     catalog: List[Dict[str, object]],
+    request_text: object = "",
 ) -> Dict[str, object]:
     _require(isinstance(raw, dict), "Provider response must be an object")
     kind = str(raw.get("kind", ""))
@@ -251,9 +278,16 @@ def validate_interpretation(
             _require(all(item["operation"] == "status" for item in validated), "Status query may only read")
         else:
             _require(all(item["operation"] != "status" for item in validated), "Direct action may not mix status")
+        _validate_spotify_room(validated, catalog, request_text)
         result["actions"] = validated
     elif kind == "automation":
-        result["automation"] = validate_automation(raw.get("automation"), catalog)
+        automation = validate_automation(raw.get("automation"), catalog)
+        _validate_spotify_room(
+            [step["action"] for step in automation["steps"] if step["kind"] == "action"],
+            catalog,
+            request_text,
+        )
+        result["automation"] = automation
     elif kind == "clarification":
         _require(bool(result["question"]), "Clarification question is empty")
     return result

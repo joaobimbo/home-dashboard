@@ -392,7 +392,7 @@ class TelegramAgent:
                 str(raw.get("kind")) if isinstance(raw, dict) else "invalid",
             )
             stage = "validation"
-            plan = validate_interpretation(raw, catalog)
+            plan = validate_interpretation(raw, catalog, message)
             logger.info(
                 "plan_validated request_id=%s kind=%s plan=%r",
                 request_id,

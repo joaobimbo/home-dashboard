@@ -74,6 +74,20 @@ class DashboardClientTests(unittest.TestCase):
         )
         self.assertEqual(client.posts[0], ("/api/spotify/pause", {}, 15))
 
+    def test_catalog_labels_known_spotify_outputs_with_their_rooms(self):
+        client = FakeClient()
+        client._get = lambda path, timeout=35: (
+            {"ok": True, "devices": [
+                {"id": "bedroom", "name": "Google Home Mini"},
+                {"id": "office", "name": "Escritorio"},
+                {"id": "phone", "name": "iPhone"},
+            ]}
+            if path == "/api/spotify/devices"
+            else FakeClient._get(client, path, timeout)
+        )
+        outputs = [item for item in client.catalog() if item["kind"] == "spotify"]
+        self.assertEqual([item["room"] for item in outputs[1:]], ["Quarto", "Escritorio", "Casa"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -126,6 +126,18 @@ class ValidationTests(unittest.TestCase):
                 CATALOG,
             )
 
+    def test_rejects_spotify_transfer_to_a_different_room(self):
+        catalog = CATALOG + [
+            {"token": "P1", "id": "bedroom", "kind": "spotify", "component": "speaker", "display_name": "Google Home Mini", "room": "Quarto", "capabilities": ["spotify_transfer"]},
+            {"token": "P2", "id": "phone", "kind": "spotify", "component": "speaker", "display_name": "iPhone", "room": "Casa", "capabilities": ["spotify_transfer"]},
+        ]
+        raw = {
+            "kind": "direct_actions", "reply": "", "question": "", "assumptions": [],
+            "actions": [{"device": "P2", "operation": "spotify_transfer", "parameters": {}}],
+        }
+        with self.assertRaisesRegex(PlanValidationError, "Quarto is unavailable"):
+            validate_interpretation(raw, catalog, "Passa a música para o quarto")
+
     def test_validates_reusable_event_rule(self):
         raw = {
             "kind": "automation",

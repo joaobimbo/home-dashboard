@@ -63,7 +63,7 @@ class WebAgent:
             catalog,
             hashlib.sha256(("web:" + browser_id).encode("utf-8")).hexdigest()[:32],
         )
-        plan = validate_interpretation(raw, catalog)
+        plan = validate_interpretation(raw, catalog, prompt)
         self.store.audit(
             "web_request_interpreted",
             kind=plan["kind"],
