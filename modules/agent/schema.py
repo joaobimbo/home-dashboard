@@ -304,6 +304,12 @@ spotify_next(output); spotify_previous(output). Use Spotify output tokens only.
 spotify_transfer(output) transfers the current Spotify session to that output without changing play/pause state.
 For pause, next, or previous use the Spotify playback token, not a speaker/output token: these affect the active session regardless of its current device.
 For a named playlist, use spotify_play_playlist(output,query=playlist name); it resolves one playlist server-side.
+For this household's Spotify outputs, interpret room and device references as follows:
+Google Home Mini is in Quarto (bedroom); Ana's Echo is in Sala/Cozinha
+(living room/kitchen); and the server PC's librespot receiver is in Escritorio
+(office). Match these references to the corresponding currently listed Spotify
+output token. If that speaker is not in the device list, say it is unavailable;
+do not substitute a different speaker.
 If a user asks for vague music such as "something upbeat" without naming a song, artist, album, or playlist, return clarification asking what they want to play; never select arbitrary music.
 
 RGB components must be integer JSON arrays from 0 to 255, for example green is

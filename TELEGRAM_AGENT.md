@@ -161,3 +161,15 @@ refreshed from Spotify at request time and must never be hard-coded.
 Examples: “pause Spotify in 10 minutes”, “move Spotify to Escritorio at 7am”,
 or “play playlist Morning on Sala Hi-Fi tomorrow at 7am”. Automation previews
 must be confirmed before they are saved.
+
+### Household Spotify outputs
+
+The agent resolves these names against Spotify's currently available Connect
+outputs (and never hard-codes an ID):
+
+- `Google Home Mini` — Quarto / bedroom
+- `Ana's Echo` — Sala/Cozinha / living room/kitchen
+- Server PC `librespot` receiver — Escritorio / office
+
+If a requested speaker is absent from Spotify's live device list, the agent
+must report it as unavailable instead of sending playback to another output.
