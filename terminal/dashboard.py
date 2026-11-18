@@ -31,6 +31,26 @@ def api(path, payload=None):
             return {'ok': False, 'error': str(exc)}
 
 
+def select_speaker(name):
+    """Route the dashboard PC's local Spotify stream to one audio sink."""
+    sinks = json.loads(subprocess.run(['pactl', '-f', 'json', 'list', 'sinks'],
+                       check=True, capture_output=True, text=True, timeout=5).stdout)
+    prefix = 'bluez_output.54_B7_E5_B9_C4_EA.' if name == 'Stanmore' else 'alsa_output.'
+    sink = next((entry['name'] for entry in sinks if entry['name'].startswith(prefix)
+                 and (name != 'Laptop' or 'analog' in entry['name'])), None)
+    if not sink:
+        return {'ok': False, 'error': name + ' não está disponível'}
+    subprocess.run(['pactl', 'set-default-sink', sink], check=True, capture_output=True, timeout=5)
+    streams = json.loads(subprocess.run(['pactl', '-f', 'json', 'list', 'sink-inputs'],
+                         check=True, capture_output=True, text=True, timeout=5).stdout)
+    for stream in streams:
+        binary = stream.get('properties', {}).get('application.process.binary', '')
+        if binary in ('librespot', 'spotify_player'):
+            subprocess.run(['pactl', 'move-sink-input', str(stream['index']), sink],
+                           check=True, capture_output=True, timeout=5)
+    return {'ok': True, 'name': name}
+
+
 def main(screen):
     curses.curs_set(0)
     screen.timeout(200)
@@ -111,6 +131,8 @@ def main(screen):
                         music_view = 'outputs'
                         music_index = 0
                         music_notice = 'Enter: escolher saída' if music_outputs else 'Nenhuma saída disponível.'
+                elif kind == 'local_speaker':
+                    music_notice = ('Erro: ' + (error or (data or {}).get('error', 'falhou'))) if error or not data or not data.get('ok') else ('Saída local: ' + data['name'])
                 elif kind == 'music_transfer':
                     if error or not data or not data.get('ok'):
                         music_notice = 'Erro: ' + (error or (data or {}).get('error', 'Transferência falhou'))
@@ -158,7 +180,7 @@ def main(screen):
                 label = item.get('name', '?') + (' · ' + item.get('subtitle', '') if music_view == 'results' else (' (ativa)' if item.get('is_active') else ''))
                 draw(11+n-offset, 3, ('› ' if n == music_index else '  ') + label, curses.color_pair(2) if n == music_index else 0)
             draw(h-5, 2, music_notice, curses.A_DIM)
-            draw(h-4, 2, 'S pesquisar  D saídas  Enter escolher  Espaço/N/P', curses.A_DIM)
+            draw(h-4, 2, 'V player  1 Stanmore  2 Laptop  D Spotify', curses.A_DIM)
         elif tab == 4:
             h, w = screen.getmaxyx()
             draw(7, 3, 'ASSISTENTE', curses.color_pair(1) | curses.A_BOLD)
@@ -239,7 +261,24 @@ def main(screen):
                 agent_token = None
                 agent_text = 'Automação cancelada.'
         elif tab == 0:
-            if key == ord('s'):
+            if key == ord('v'):
+                curses.def_prog_mode()
+                curses.endwin()
+                try:
+                    subprocess.run([os.path.expanduser('~/.local/bin/spotify_player')], check=False)
+                except OSError as exc:
+                    message = 'Não foi possível abrir spotify-player: ' + str(exc)
+                finally:
+                    curses.reset_prog_mode()
+                    curses.curs_set(0)
+                    screen.clear()
+                    screen.refresh()
+                    last_refresh = 0
+            elif key in (ord('1'), ord('2')):
+                name = 'Stanmore' if key == ord('1') else 'Laptop'
+                music_notice = 'A mudar saída local…'
+                job('local_speaker', lambda name=name: select_speaker(name))
+            elif key == ord('s'):
                 h, w = screen.getmaxyx()
                 draw(h-4, 2, 'Pesquisar: ' + ' '*max(0, w-15))
                 curses.echo(); curses.curs_set(1); screen.timeout(-1)
