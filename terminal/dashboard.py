@@ -117,9 +117,10 @@ def main(screen):
                 else:
                     detail = str(device.get('state', device.get('status', '')))
                     if isinstance(device.get('state'), dict): detail = str(device['state'].get('state', ''))
+                    if isinstance(device.get('brightness'), (int, float)): detail += '  %s%%' % device['brightness']
                 draw(7+n-offset, 3, ('› ' if n == selected else '  ') + title + '   ' + room + '   ' + detail, curses.color_pair(2) if n == selected else 0)
             if not rows: draw(7, 4, 'Sem dispositivos disponíveis.')
-            draw(max(8, h-5), 2, 'Enter: ligar/desligar  |  AC: +/- temperatura, M modo, F ventoinha' if tab != 3 else 'Enter: abrir  |  F: fechar  |  S: parar', curses.A_DIM)
+            draw(max(8, h-5), 2, ('Enter: ligar  +/-: temperatura  M: modo  F: ventoinha' if tab == 1 else ('Enter: ligar  B: brilho %%  +/-: brilho' if tab == 2 else 'Enter: abrir  F: fechar  S: parar')), curses.A_DIM)
         h, w = screen.getmaxyx()
         draw(h-3, 2, message, curses.color_pair(4))
         draw(h-2, 2, '← → separadores   ↑ ↓ selecionar   R atualizar   Q sair', curses.A_DIM)
@@ -151,6 +152,30 @@ def main(screen):
                     post(base+('/mode' if key == ord('m') else '/fan'), {('mode' if key == ord('m') else 'speed'): value})
             elif tab == 3 and key in (10, 13, curses.KEY_ENTER, ord('f'), ord('s')):
                 post('/api/shelly/'+ident+'/cover_action', {'command': 'close' if key == ord('f') else ('stop' if key == ord('s') else 'open')})
+            elif tab == 2 and key in (ord('b'), ord('+'), ord('-')) and device.get('component') in ('light', 'rgbcct'):
+                current = device.get('brightness') or 50
+                if key == ord('b'):
+                    h, w = screen.getmaxyx()
+                    draw(h-3, 2, 'Brilho (1-100): ' + ' '*12)
+                    screen.move(h-3, min(18, w-2))
+                    curses.echo()
+                    curses.curs_set(1)
+                    screen.timeout(-1)
+                    try:
+                        raw = screen.getstr(h-3, min(18, w-2), 3).decode('ascii', 'ignore')
+                        value = int(raw)
+                    except ValueError:
+                        value = 0
+                    finally:
+                        curses.noecho()
+                        curses.curs_set(0)
+                        screen.timeout(200)
+                else:
+                    value = max(1, min(100, int(current) + (5 if key == ord('+') else -5)))
+                if 1 <= value <= 100:
+                    post('/api/shelly/'+ident+('/rgbcct' if device.get('component') == 'rgbcct' else '/light_level'), {'brightness': value})
+                else:
+                    message = 'Introduza um valor entre 1 e 100.'
             elif tab == 2 and key in (10, 13, curses.KEY_ENTER):
                 post('/api/shelly/'+ident+'/action', {'action': 'toggle'})
 
