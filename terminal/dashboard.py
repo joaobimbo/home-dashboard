@@ -48,6 +48,13 @@ def main(screen):
     agent_text = 'Enter: escrever um pedido ao assistente.'
     agent_token = None
     agent_busy = False
+    music_results = []
+    music_outputs = []
+    music_view = 'results'
+    music_index = 0
+    music_output = None
+    transfer_target = {}
+    music_notice = 'S: pesquisar   D: escolher saída'
     last_refresh = 0
     def job(kind, fn):
         def run():
@@ -91,6 +98,26 @@ def main(screen):
                         devices, ac, states, music = data
                         items = [[], ac, [d for d in devices if d.get('component') != 'cover'], [d for d in devices if d.get('component') == 'cover']]
                         message = 'Atualizado às ' + time.strftime('%H:%M:%S')
+                elif kind in ('music_search', 'music_outputs'):
+                    if error or not data or not data.get('ok'):
+                        music_notice = 'Erro: ' + (error or (data or {}).get('error', 'Spotify indisponível'))
+                    elif kind == 'music_search':
+                        music_results = data.get('results', [])
+                        music_view = 'results'
+                        music_index = 0
+                        music_notice = 'Enter: reproduzir' if music_results else 'Sem resultados.'
+                    else:
+                        music_outputs = data.get('devices', [])
+                        music_view = 'outputs'
+                        music_index = 0
+                        music_notice = 'Enter: escolher saída' if music_outputs else 'Nenhuma saída disponível.'
+                elif kind == 'music_transfer':
+                    if error or not data or not data.get('ok'):
+                        music_notice = 'Erro: ' + (error or (data or {}).get('error', 'Transferência falhou'))
+                    else:
+                        music_output = transfer_target.get('id')
+                        music_notice = 'Saída selecionada: ' + transfer_target.get('name', '')
+                        last_refresh = 0
                 elif kind == 'agent':
                     agent_busy = False
                     if error:
@@ -117,9 +144,21 @@ def main(screen):
             x += len(label) + 1
         if tab == 0:
             track = music.get('track') or {}
-            draw(7, 4, track.get('name') or 'Sem reprodução ativa', curses.A_BOLD)
-            draw(8, 4, ', '.join(track.get('artists') or []))
-            draw(10, 4, 'Espaço: reproduzir / pausar    N: seguinte    P: anterior')
+            draw(6, 3, track.get('name') or 'Sem reprodução ativa', curses.A_BOLD)
+            draw(7, 3, ', '.join(track.get('artists') or []))
+            active = music.get('device') or {}
+            chosen = next((d for d in music_outputs if d.get('id') == music_output), None)
+            draw(8, 3, 'Saída: ' + ((chosen or active).get('name') or 'não selecionada'), curses.color_pair(1))
+            draw(10, 3, 'SAÍDAS' if music_view == 'outputs' else 'PESQUISA', curses.A_BOLD)
+            music_rows = music_outputs if music_view == 'outputs' else music_results
+            h, w = screen.getmaxyx()
+            visible = max(1, h - 16)
+            offset = max(0, music_index - visible + 1)
+            for n, item in enumerate(music_rows[offset:offset+visible], offset):
+                label = item.get('name', '?') + (' · ' + item.get('subtitle', '') if music_view == 'results' else (' (ativa)' if item.get('is_active') else ''))
+                draw(11+n-offset, 3, ('› ' if n == music_index else '  ') + label, curses.color_pair(2) if n == music_index else 0)
+            draw(h-5, 2, music_notice, curses.A_DIM)
+            draw(h-4, 2, 'S pesquisar  D saídas  Enter escolher  Espaço/N/P', curses.A_DIM)
         elif tab == 4:
             h, w = screen.getmaxyx()
             draw(7, 3, 'ASSISTENTE', curses.color_pair(1) | curses.A_BOLD)
@@ -164,8 +203,12 @@ def main(screen):
         if key in (ord('q'), ord('Q')): break
         if key in (curses.KEY_LEFT, ord('h')): tab = (tab-1)%len(TABS); selected = 0
         elif key in (curses.KEY_RIGHT, ord('l'), 9): tab = (tab+1)%len(TABS); selected = 0
-        elif key in (curses.KEY_UP, ord('k')): selected = max(0, selected-1)
-        elif key in (curses.KEY_DOWN, ord('j')): selected = min(len(rows)-1, selected+1)
+        elif key in (curses.KEY_UP, ord('k')):
+            if tab == 0: music_index = max(0, music_index-1)
+            else: selected = max(0, selected-1)
+        elif key in (curses.KEY_DOWN, ord('j')):
+            if tab == 0: music_index = max(0, min(len(music_outputs if music_view == 'outputs' else music_results)-1, music_index+1))
+            else: selected = min(len(rows)-1, selected+1)
         elif key in (ord('r'), ord('R')): refresh()
         elif tab == 4 and not agent_busy:
             if key in (10, 13, curses.KEY_ENTER):
@@ -195,9 +238,37 @@ def main(screen):
             elif key == ord('x') and agent_token:
                 agent_token = None
                 agent_text = 'Automação cancelada.'
-        elif tab == 0 and key in (32, ord('n'), ord('p')):
-            command = ('pause' if music.get('is_playing') else 'play') if key == 32 else ('next' if key == ord('n') else 'previous')
-            post('/api/spotify/' + command, {})
+        elif tab == 0:
+            if key == ord('s'):
+                h, w = screen.getmaxyx()
+                draw(h-4, 2, 'Pesquisar: ' + ' '*max(0, w-15))
+                curses.echo(); curses.curs_set(1); screen.timeout(-1)
+                try:
+                    query = screen.getstr(h-4, min(13, w-2), max(1, min(250, w-15))).decode('utf-8', 'replace').strip()
+                finally:
+                    curses.noecho(); curses.curs_set(0); screen.timeout(200)
+                if query:
+                    music_notice = 'A pesquisar…'
+                    job('music_search', lambda query=query: api('/api/spotify/search?q=' + urllib.parse.quote(query)))
+            elif key == ord('d'):
+                music_notice = 'A procurar saídas…'
+                job('music_outputs', lambda: api('/api/spotify/devices'))
+            elif key in (10, 13, curses.KEY_ENTER):
+                music_rows = music_outputs if music_view == 'outputs' else music_results
+                if music_rows:
+                    item = music_rows[music_index]
+                    if music_view == 'outputs':
+                        if item.get('is_restricted'):
+                            music_notice = 'Esta saída não permite controlo.'
+                        else:
+                            transfer_target = item
+                            music_notice = 'A mudar de saída…'
+                            job('music_transfer', lambda ident=item['id']: api('/api/spotify/device', {'device_id': ident}))
+                    else:
+                        post('/api/spotify/play-uri', {'uri': item['uri'], 'device_id': music_output})
+            elif key in (32, ord('n'), ord('p')):
+                command = ('pause' if music.get('is_playing') else 'play') if key == 32 else ('next' if key == ord('n') else 'previous')
+                post('/api/spotify/' + command, {'device_id': music_output})
         elif rows:
             device = rows[selected]; ident = urllib.parse.quote(device['id'], safe='')
             if tab == 1:
