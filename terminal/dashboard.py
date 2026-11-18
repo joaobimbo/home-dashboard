@@ -2,6 +2,10 @@
 """Keyboard dashboard for the local console; all device access goes via Flask."""
 import curses
 import json
+import os
+import subprocess
+import http.cookiejar
+import textwrap
 import queue
 import threading
 import time
@@ -10,14 +14,15 @@ import urllib.parse
 import urllib.request
 
 BASE = 'http://127.0.0.1:5000'
-TABS = ('Música', 'AC', 'Luzes', 'Estores')
+TABS = ('Música', 'AC', 'Luzes', 'Estores', 'Agente')
+OPENER = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
 
 def api(path, payload=None):
     data = None if payload is None else json.dumps(payload).encode()
     req = urllib.request.Request(BASE + path, data=data, headers={'Content-Type': 'application/json'})
     try:
-        with urllib.request.urlopen(req, timeout=100) as response:
+        with OPENER.open(req, timeout=100) as response:
             return json.load(response)
     except urllib.error.HTTPError as exc:
         try:
@@ -40,6 +45,9 @@ def main(screen):
     items, states, music = [], {}, {}
     results = queue.Queue()
     loading = False
+    agent_text = 'Enter: escrever um pedido ao assistente.'
+    agent_token = None
+    agent_busy = False
     last_refresh = 0
     def job(kind, fn):
         def run():
@@ -83,12 +91,21 @@ def main(screen):
                         devices, ac, states, music = data
                         items = [[], ac, [d for d in devices if d.get('component') != 'cover'], [d for d in devices if d.get('component') == 'cover']]
                         message = 'Atualizado às ' + time.strftime('%H:%M:%S')
+                elif kind == 'agent':
+                    agent_busy = False
+                    if error:
+                        agent_text = 'Erro: ' + error
+                    elif not data or not data.get('ok'):
+                        agent_text = (data or {}).get('error', 'Não foi possível contactar o assistente.')
+                    else:
+                        agent_text = data.get('message') or 'Concluído.'
+                        agent_token = data.get('token') if data.get('kind') == 'automation_confirmation' else None
                 else:
                     message = ('Erro: ' + error) if error else (('Erro: ' + str(data.get('error', 'falhou'))) if isinstance(data, dict) and not data.get('ok', True) else 'Comando enviado')
                     last_refresh = 0
         except queue.Empty: pass
         if time.monotonic() - last_refresh > 30: refresh()
-        rows = items[tab] if items else []
+        rows = items[tab] if items and tab < len(items) else []
         selected = max(0, min(selected, len(rows)-1))
         screen.erase()
         draw(1, 2, 'NOSSA CASINHA', curses.color_pair(1) | curses.A_BOLD)
@@ -103,6 +120,15 @@ def main(screen):
             draw(7, 4, track.get('name') or 'Sem reprodução ativa', curses.A_BOLD)
             draw(8, 4, ', '.join(track.get('artists') or []))
             draw(10, 4, 'Espaço: reproduzir / pausar    N: seguinte    P: anterior')
+        elif tab == 4:
+            h, w = screen.getmaxyx()
+            draw(7, 3, 'ASSISTENTE', curses.color_pair(1) | curses.A_BOLD)
+            for row, line in enumerate(textwrap.wrap(agent_text, width=max(10, w-7), replace_whitespace=False)[:max(1, h-13)]):
+                draw(9+row, 3, line)
+            if agent_token:
+                draw(h-5, 2, 'C: confirmar automação    X: cancelar', curses.color_pair(4))
+            else:
+                draw(h-5, 2, 'Enter: escrever pedido', curses.A_DIM)
         else:
             h, w = screen.getmaxyx()
             visible = max(1, h - 13)
@@ -126,12 +152,49 @@ def main(screen):
         draw(h-2, 2, '← → separadores   ↑ ↓ selecionar   R atualizar   Q sair', curses.A_DIM)
         screen.refresh()
         key = screen.getch()
+        if key != -1 and os.environ.get('TERM') == 'linux':
+            # The web screen-off action uses force blanking, which stays blank
+            # until explicitly poked even when the console receives input.
+            try:
+                subprocess.run(['/usr/bin/setterm', '--term', 'linux', '--blank', 'poke'],
+                               stderr=subprocess.DEVNULL,
+                               timeout=1, check=False)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
         if key in (ord('q'), ord('Q')): break
-        if key in (curses.KEY_LEFT, ord('h')): tab = (tab-1)%4; selected = 0
-        elif key in (curses.KEY_RIGHT, ord('l'), 9): tab = (tab+1)%4; selected = 0
+        if key in (curses.KEY_LEFT, ord('h')): tab = (tab-1)%len(TABS); selected = 0
+        elif key in (curses.KEY_RIGHT, ord('l'), 9): tab = (tab+1)%len(TABS); selected = 0
         elif key in (curses.KEY_UP, ord('k')): selected = max(0, selected-1)
         elif key in (curses.KEY_DOWN, ord('j')): selected = min(len(rows)-1, selected+1)
         elif key in (ord('r'), ord('R')): refresh()
+        elif tab == 4 and not agent_busy:
+            if key in (10, 13, curses.KEY_ENTER):
+                h, w = screen.getmaxyx()
+                draw(h-4, 2, 'Pedido: ' + ' '*max(0, w-12))
+                curses.echo()
+                curses.curs_set(1)
+                screen.timeout(-1)
+                try:
+                    raw = screen.getstr(h-4, min(10, w-2), max(1, min(500, w-12)))
+                    prompt = raw.decode('utf-8', 'replace').strip()
+                finally:
+                    curses.noecho()
+                    curses.curs_set(0)
+                    screen.timeout(200)
+                if prompt:
+                    agent_token = None
+                    agent_text = 'A interpretar o pedido…'
+                    agent_busy = True
+                    job('agent', lambda prompt=prompt: api('/api/agent/request', {'message': prompt}))
+            elif key == ord('c') and agent_token:
+                token = agent_token
+                agent_token = None
+                agent_busy = True
+                agent_text = 'A guardar automação…'
+                job('agent', lambda token=token: api('/api/agent/confirm', {'token': token}))
+            elif key == ord('x') and agent_token:
+                agent_token = None
+                agent_text = 'Automação cancelada.'
         elif tab == 0 and key in (32, ord('n'), ord('p')):
             command = ('pause' if music.get('is_playing') else 'play') if key == 32 else ('next' if key == ord('n') else 'previous')
             post('/api/spotify/' + command, {})
