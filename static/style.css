@@ -996,3 +996,17 @@ button:hover {
     transform: translateX(0);
   }
 }
+
+.restart-control { text-align: center; max-width: 180px; }
+.restart-button { min-width: 48px; min-height: 48px; border: 1px solid #ccc; border-radius: 50%; background: #fff; color: #243c34; font-size: 30px; cursor: pointer; }
+.restart-button:disabled { opacity: 0.5; cursor: wait; }
+#restart-status { display: block; font-size: 12px; margin-top: 4px; }
+
+.service-logs { width: 100%; min-width: 0; box-sizing: border-box; }
+.logs-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 16px 0 10px; }
+.logs-toolbar .spotify-select { width: auto; max-width: 100%; }
+.logs-terminal { box-sizing: border-box; width: 100%; height: 320px; overflow: auto; padding: 14px; border-radius: 10px; background: #121a20; color: #d7f4dc; font: 12px/1.6 monospace; white-space: pre-wrap; word-wrap: break-word; text-align: left; }
+.logs-caption, #logs-state { font-size: 12px; }
+
+.screen-off-link { font-size: 12px; color: #64736c; text-decoration: none; padding: 10px 4px; }
+.screen-off-link:hover, .screen-off-link:focus { text-decoration: underline; }

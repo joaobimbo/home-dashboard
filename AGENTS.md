@@ -76,3 +76,11 @@
 - Prefer touch-safe interactions and simple controls; old iPad Safari has inconsistent behavior with some slider/click patterns.
 - `classList.add()`/`.remove()` must be called with **one class name at a time** — multi-argument calls aren't guaranteed on old WebKit's `DOMTokenList`. Use the `removeClasses(el, names)` helper instead of `el.classList.remove(a, b, c)`. A multi-argument `classList.remove()` as the first line of `paintAcCard` previously broke AC card state rendering entirely on an old iPad (the call threw before any state update ran).
 - `document.hidden`/`visibilitychange` aren't available (unprefixed) on pre-iOS-7 Safari. Use the `isPageHidden()` helper and the pre-computed `visibilityChangeEventName` instead of referencing `document.hidden`/`"visibilitychange"` directly.
+
+## AC timeout recovery (November 2026)
+
+- Daikin now uses a single bounded `connection._connect()` attempt because pymadoka's `start()` loop swallows cancellation. Recheck this internal method on library upgrades.
+- Command/readback has a 12-second deadline; disconnect cleanup is bounded to 3 seconds per attempt. The outer watchdog releases the lock and quarantines an unresponsive BLE worker until dashboard restart instead of allowing overlapping radio operations.
+- HTTP requests wait up to 60 seconds for the radio. The named background poller yields to queued requests.
+- Heating mode displays `heating_set_point`; other modes retain `cooling_set_point`. Both values are returned for diagnostics. The office AC has reported a 23°C heating target alongside a 24°C cooling target, so always displaying cooling caused a one-degree discrepancy.
+- Focused regression check: `.venv/bin/python -m unittest discover -s tests -p test_daikin_timeouts.py`.

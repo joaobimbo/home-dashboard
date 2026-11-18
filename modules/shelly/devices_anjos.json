@@ -49,7 +49,7 @@
     "display_name": "Estore Quarto 1A",
     "other_names": ["Room 1 blinders A"],
     "room": "Casa",
-    "host": "192.168.1.2",
+    "host": "192.168.1.228",
     "component": "cover",
     "relay": 0,
     "image": ""

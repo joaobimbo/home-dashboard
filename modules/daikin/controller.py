@@ -90,7 +90,7 @@ class DaikinController:
         config_path: Optional[str] = None,
         discover_timeout: float = 4.0,
         quick_scan_timeout: float = 2.0,
-        ble_lock_timeout: float = 25.0,
+        ble_lock_timeout: float = 60.0,
         connect_timeout: float = 20.0,
         poll_interval: float = 120.0,
     ):
@@ -108,12 +108,16 @@ class DaikinController:
         # this all runs under _ble_lock - would permanently lock out every
         # Daikin device until the process is restarted.
         self._connect_timeout = connect_timeout
+        self._command_timeout = 12.0
+        self._ble_fault = False
         # Only one BLE conversation can happen at a time - the adapter can only
         # hold one connection per peripheral and pymadoka's discovery cache is
         # a shared module-level global - so concurrent requests (e.g. from two
         # browser tabs under the threaded Flask server) must be serialized
         # here instead of racing each other.
         self._ble_lock = threading.Lock()
+        self._queue_lock = threading.Lock()
+        self._waiting_requests = 0
         # Bleak's BlueZ backend keeps a process-global D-Bus manager tied to
         # the asyncio loop that first used it. Creating a fresh loop with
         # asyncio.run() for every request eventually leaves that manager bound
@@ -233,7 +237,7 @@ class DaikinController:
                 for device in self.devices:
                     try:
                         result = self.get_status(device.id)
-                        if not result.get("ok"):
+                        if not result.get("ok") and not result.get("skipped"):
                             logger.warning(
                                 "daikin_background_poll_failed device_id=%s device_name=%r error=%s",
                                 device.id,
@@ -251,9 +255,11 @@ class DaikinController:
                             device.id,
                             device.name,
                         )
+                    # Let waiting user requests acquire the radio between polls.
+                    time.sleep(0.1)
                 time.sleep(self._poll_interval)
 
-        thread = threading.Thread(target=loop, daemon=True)
+        thread = threading.Thread(target=loop, name="daikin-poller", daemon=True)
         thread.start()
 
     def set_power(self, device_id: str, on: bool):
@@ -332,11 +338,15 @@ class DaikinController:
         return self._status_payload(power, mode, set_point, fan, temps)
 
     def _status_payload(self, power, mode, set_point, fan, temps):
+        active_mode = str(mode.operation_mode).lower()
         return {
             "ok": True,
             "power": bool(power.turn_on),
-            "mode": str(mode.operation_mode).lower(),
-            "setpoint": set_point.cooling_set_point,
+            "mode": active_mode,
+            "setpoint": (set_point.heating_set_point if active_mode == "heat"
+                         else set_point.cooling_set_point),
+            "cooling_setpoint": set_point.cooling_set_point,
+            "heating_setpoint": set_point.heating_set_point,
             "current_temp": temps.indoor,
             "fan_speed": str(fan.cooling_fan_speed).lower(),
         }
@@ -358,6 +368,21 @@ class DaikinController:
         if not loop_ready.wait(timeout=5.0):
             raise DaikinControllerError("Could not start the Daikin BLE event loop")
 
+    def _acquire_ble_lock(self):
+        # Background refreshes must not jump ahead of queued HTTP commands.
+        if threading.current_thread().name == "daikin-poller":
+            with self._queue_lock:
+                if self._waiting_requests:
+                    return False
+                return self._ble_lock.acquire(blocking=False)
+        with self._queue_lock:
+            self._waiting_requests += 1
+        try:
+            return self._ble_lock.acquire(timeout=self._ble_lock_timeout)
+        finally:
+            with self._queue_lock:
+                self._waiting_requests -= 1
+
     def _run(self, device: DaikinDevice, action, operation: str):
         try:
             lib = _load_pymadoka()
@@ -368,7 +393,9 @@ class DaikinController:
             )
             return {"ok": False, "id": device.id, "name": device.name, "error": str(exc)}
 
-        if not self._ble_lock.acquire(timeout=self._ble_lock_timeout):
+        if not self._acquire_ble_lock():
+            if threading.current_thread().name == "daikin-poller":
+                return {"ok": False, "skipped": True, "id": device.id}
             logger.warning(
                 "daikin_operation_busy operation=%s device_id=%s device_name=%r lock_timeout_seconds=%s",
                 operation, device.id, device.name, self._ble_lock_timeout,
@@ -380,30 +407,46 @@ class DaikinController:
                 "error": "Daikin control is busy with another request, try again shortly",
             }
 
-        self._ensure_ble_loop()
+        phase = "initialization"
 
         async def runner():
-            await lib["force_device_disconnect"](device.address)
+            nonlocal phase
+            phase = "disconnect before scan"
+            process = await asyncio.create_subprocess_exec(
+                "bluetoothctl", "--timeout", "5", "disconnect", device.address,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+            )
+            try:
+                await asyncio.wait_for(process.wait(), timeout=6)
+            finally:
+                if process.returncode is None:
+                    process.kill()
+                    await process.wait()
+            phase = "scan"
 
             # We already know the address from devices.json, so look for that
             # one device only instead of pymadoka's discover_devices(), which
             # always sleeps the full timeout scanning for everything nearby.
             # find_device_by_address() returns as soon as it sees a match.
-            matched = await lib["BleakScanner"].find_device_by_address(
-                device.address,
-                timeout=self._quick_scan_timeout,
-                adapter=device.adapter,
+            matched = await asyncio.wait_for(
+                lib["BleakScanner"].find_device_by_address(
+                    device.address, timeout=self._quick_scan_timeout, adapter=device.adapter,
+                ), timeout=self._quick_scan_timeout + 3,
             )
             if matched is not None:
                 lib["connection_module"].DISCOVERED_DEVICES_CACHE = [matched]
             else:
-                cache = await lib["discover_devices"](
-                    timeout=self._discover_timeout, adapter=device.adapter
+                cache = await asyncio.wait_for(
+                    lib["discover_devices"](timeout=self._discover_timeout, adapter=device.adapter),
+                    timeout=self._discover_timeout + 3,
                 )
                 matched = next(
                     (d for d in cache if d.address.upper() == device.address.upper()),
                     None,
                 )
+
+            if matched is None:
+                raise DaikinControllerError("AC not found during Bluetooth scan")
 
             # A request owns exactly one connect/disconnect cycle. In
             # particular, disable pymadoka's retry loop: it catches a task
@@ -432,14 +475,27 @@ class DaikinController:
                         adapter=device.adapter,
                         disconnected_callback=lambda _client: None,
                     )
+                phase = "connect"
+                # start() swallows cancellation in pymadoka's retry loop.
+                # _connect() performs one attempt and honors cancellation.
                 await asyncio.wait_for(
-                    madoka.start(), timeout=self._connect_timeout
+                    madoka.connection._connect(), timeout=self._connect_timeout
                 )
-                return await action(madoka, lib)
+                phase = operation + " command/readback"
+                task = asyncio.create_task(action(madoka, lib))
+                done, _pending = await asyncio.wait({task}, timeout=self._command_timeout)
+                if not done:
+                    task.cancel()
+                    try:
+                        await task
+                    except (Exception, asyncio.CancelledError):
+                        pass
+                    raise DaikinControllerError("Bluetooth timed out during " + phase)
+                return task.result()
             finally:
                 client = madoka.connection.client
                 try:
-                    await asyncio.wait_for(madoka.stop(), timeout=self._connect_timeout)
+                    await asyncio.wait_for(madoka.stop(), timeout=3.0)
                 except Exception:
                     # cleanup() calls stop_notify() before disconnect(). If
                     # stop_notify() fails, pymadoka never reaches disconnect
@@ -448,7 +504,7 @@ class DaikinController:
                     if client is not None:
                         try:
                             await asyncio.wait_for(
-                                client.disconnect(), timeout=self._connect_timeout
+                                client.disconnect(), timeout=3.0
                             )
                         except Exception:
                             # Bleak 0.20 has no public finalizer for a failed
@@ -463,8 +519,21 @@ class DaikinController:
                                     pass
 
         try:
+            if self._ble_fault:
+                raise DaikinControllerError("Bluetooth worker is unresponsive; restart the dashboard")
+            self._ensure_ble_loop()
             future = asyncio.run_coroutine_threadsafe(runner(), self._ble_loop)
-            result = future.result()
+            # Last-resort watchdog: never allow a broken library to hold the
+            # shared lock forever. Quarantine the radio if cancellation hangs.
+            total_timeout = (20 + self._quick_scan_timeout + self._discover_timeout
+                             + self._connect_timeout + 6 + self._command_timeout)
+            try:
+                result = future.result(timeout=total_timeout)
+            except TimeoutError:
+                if not future.done():
+                    self._ble_fault = True
+                    future.cancel()
+                raise DaikinControllerError("Bluetooth timed out during " + phase)
             result["id"] = device.id
             result["name"] = device.name
             if result.get("ok"):

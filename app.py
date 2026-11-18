@@ -1,6 +1,8 @@
 import logging
 import os
 import subprocess
+import threading
+import secrets
 import uuid
 
 from flask import Flask, jsonify, render_template, request
@@ -18,6 +20,16 @@ from modules.spotify import SpotifyController
 logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
 app = Flask(__name__)
+restart_token = secrets.token_urlsafe(32)
+server_instance = uuid.uuid4().hex
+restart_lock = threading.Lock()
+restart_pending = False
+
+
+def exit_for_restart():
+    # systemd Restart=always restarts the whole process, including stuck BLE threads.
+    os._exit(0)
+
 controller = ShellyController.from_sources()
 scene_store = SceneStore()
 daikin_controller = DaikinController.from_sources()
@@ -69,6 +81,8 @@ def index():
         daikin_devices=daikin_devices,
         rooms=rooms,
         web_agent_available=True,
+        restart_token=restart_token,
+        server_instance=server_instance,
     )
 
 
@@ -77,10 +91,56 @@ def status():
     return jsonify(
         {
             "server": "running",
+            "instance": server_instance,
             "message": "Home dashboard online",
             "devices": len(controller.devices),
         }
     )
+
+
+@app.route("/api/service/restart", methods=["POST"])
+def restart_service():
+    global restart_pending
+    payload = request.get_json(silent=True) or {}
+    token = payload.get("token") if isinstance(payload, dict) else None
+    if not isinstance(token, str) or not secrets.compare_digest(token, restart_token):
+        return jsonify({"ok": False, "error": "Atualize a página antes de reiniciar."}), 403
+    if not os.environ.get("INVOCATION_ID"):
+        return jsonify({"ok": False, "error": "Restart requires the systemd service"}), 503
+    with restart_lock:
+        if not restart_pending:
+            restart_pending = True
+            app.logger.warning("Dashboard restart requested from the dashboard")
+            timer = threading.Timer(1.0, exit_for_restart)
+            timer.daemon = True
+            timer.start()
+    return jsonify({"ok": True, "instance": server_instance}), 202
+
+
+@app.route("/api/service/logs")
+def service_logs():
+    units = {"dashboard": "home-dashboard.service", "agent": "home-dashboard-agent.service"}
+    unit = units.get(request.args.get("service", "dashboard"))
+    if unit is None:
+        return jsonify({"ok": False, "error": "Unknown service"}), 400
+    if not secrets.compare_digest(request.headers.get("X-Dashboard-Token", ""), restart_token):
+        return jsonify({"ok": False, "error": "Atualize a página para ver os registos."}), 403
+    try:
+        logs = subprocess.run(
+            ["journalctl", "--quiet", "--no-pager", "--unit", unit,
+             "--lines", "150", "--output", "short-iso"],
+            capture_output=True, text=True, timeout=5)
+        state = subprocess.run(["systemctl", "is-active", unit],
+                               capture_output=True, text=True, timeout=3)
+        if logs.returncode != 0:
+            return jsonify({"ok": False, "error": "Não foi possível ler os registos."}), 503
+        response = jsonify({"ok": True, "unit": unit,
+                            "state": state.stdout.strip() or "unknown",
+                            "logs": logs.stdout[-100000:]})
+        response.headers["Cache-Control"] = "no-store"
+        return response
+    except (OSError, subprocess.TimeoutExpired):
+        return jsonify({"ok": False, "error": "Registos indisponíveis. A tentar novamente…"}), 503
 
 
 @app.route("/api/weather")
@@ -329,9 +389,27 @@ def daikin_fan(device_id):
     return jsonify(result), status_code
 
 
-@app.route("/screen/off", methods=["GET","POST"])
+@app.route("/screen/off", methods=["GET", "POST"])
 def screen_off():
-    subprocess.run(["xset", "-display", ":0", "dpms","force","off"])
+    # The dashboard boots into tty1 without an X server. Console blanking
+    # requires the exact command allowed by deploy/home-dashboard-screen.sudoers.
+    try:
+        with open("/dev/tty1", "r+b", buffering=0) as console:
+            result = subprocess.run(
+                ["sudo", "-n", "/usr/bin/setterm", "--term", "linux", "--blank", "force"],
+                stdin=console,
+                stdout=console,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=5,
+            )
+        # setterm can report ioctl failures on stderr while returning zero.
+        if result.returncode != 0 or result.stderr.strip():
+            app.logger.error("Console screen-off failed: %s", result.stderr.strip())
+            return {"ok": False, "error": "Console blanking failed; check screen-control sudo permissions and dashboard logs"}, 503
+    except (OSError, subprocess.TimeoutExpired):
+        app.logger.exception("Console screen-off failed")
+        return {"ok": False, "error": "Console blanking unavailable; check dashboard logs"}, 503
     return {"ok": True}
 
 if __name__ == "__main__":

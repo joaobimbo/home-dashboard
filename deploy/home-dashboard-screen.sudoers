@@ -1,0 +1,2 @@
+# Allow only the physical console screen-off command.
+joao ALL=(root) NOPASSWD: /usr/bin/setterm --term linux --blank force

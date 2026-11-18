@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=Fraunces:opsz,wght@9..144,600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='24') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='26') }}">
 </head>
 <body>
   <div class="dashboard-shell">
@@ -16,7 +16,7 @@
         <div>
           <p class="tag">Local Home Dashboard</p>
           <h1>Bom dia!</h1>
-          <p class="subtitle">Painel Shelly em tempo real para toda a casa.</p>
+          <p class="subtitle">Painel -- Nossa Casinha</p>
         </div>
         <div class="hero-widgets">
           <div class="widget weather" id="weather-widget">
@@ -24,6 +24,11 @@
             <span class="weather-label" data-weather-label>--</span>
           </div>
           <div class="widget clock" id="clock-widget">--:--</div>
+          <a class="screen-off-link" href="/screen/off" target="_blank" rel="noopener" title="Desligar ecrã">Ecrã off</a>
+          <div class="restart-control">
+            <button type="button" class="restart-button" id="restart-service" title="Reiniciar dashboard" aria-label="Reiniciar dashboard" data-token="{{ restart_token }}" data-instance="{{ server_instance }}"><span aria-hidden="true">&#8635;</span></button>
+            <span id="restart-status" role="status" aria-live="polite"></span>
+          </div>
         </div>
       </header>
 
@@ -186,6 +191,22 @@
           <p class="agent-unavailable">O assistente não está configurado neste servidor.</p>
           {% endif %}
         </section>
+        <section class="panel service-logs" aria-labelledby="logs-toggle">
+          <button type="button" class="cover-modal-btn" id="logs-toggle" aria-expanded="false" aria-controls="logs-panel">&gt;_ Registos dos serviços</button>
+          <div id="logs-panel" hidden>
+            <div class="logs-toolbar">
+              <label for="logs-service">Serviço</label>
+              <select id="logs-service" class="spotify-select">
+                <option value="dashboard">Dashboard</option>
+                <option value="agent">Agente de automação</option>
+              </select>
+              <button type="button" class="cover-modal-btn" id="logs-pause">Pausar</button>
+              <span id="logs-state" role="status" aria-live="polite"></span>
+            </div>
+            <pre id="logs-output" class="logs-terminal" tabindex="0" aria-label="Registos do serviço">A carregar…</pre>
+            <p class="logs-caption">Últimas 150 linhas disponíveis · Atualização a cada 4 segundos</p>
+          </div>
+        </section>
       </main>
     </div>
   </div>
@@ -327,6 +348,6 @@
   <script>
     window.__CONFIGURED_DEVICES__ = {{ devices|tojson }};
   </script>
-  <script src="{{ url_for('static', filename='app.js', v='32') }}"></script>
+  <script src="{{ url_for('static', filename='app.js', v='34') }}"></script>
 </body>
 </html>

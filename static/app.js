@@ -1,4 +1,108 @@
 (function () {
+  var restartButton = document.getElementById("restart-service");
+  var restartStatus = document.getElementById("restart-status");
+  if (restartButton) {
+    restartButton.addEventListener("click", function () {
+      var oldInstance = restartButton.getAttribute("data-instance");
+      var deadline = new Date().getTime() + 60000;
+      if (restartButton.disabled) { return; }
+      restartButton.disabled = true;
+      restartStatus.textContent = "A reiniciar…";
+      function checkRestart() {
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", "/api/status?_=" + new Date().getTime(), true);
+        xhr.timeout = 3000;
+        function retry() {
+          if (new Date().getTime() >= deadline) {
+            restartStatus.textContent = "Sem resposta. Atualize a página para verificar.";
+            restartButton.disabled = false;
+          } else { window.setTimeout(checkRestart, 1500); }
+        }
+        xhr.onload = function () {
+          var info;
+          try { info = JSON.parse(xhr.responseText); } catch (e) { retry(); return; }
+          if (xhr.status === 200 && info.instance && info.instance !== oldInstance) {
+            window.location.reload();
+          } else { retry(); }
+        };
+        xhr.onerror = retry;
+        xhr.ontimeout = retry;
+        xhr.send(null);
+      }
+      requestJSON("POST", "/api/service/restart", { token: restartButton.getAttribute("data-token") }, function (err, result) {
+        if (result && result.ok === false) {
+          restartStatus.textContent = result.error || "Não foi possível reiniciar.";
+          restartButton.disabled = false;
+          return;
+        }
+        window.setTimeout(checkRestart, 1500);
+      });
+    });
+  }
+  var logsToggle = document.getElementById("logs-toggle");
+  var logsPanel = document.getElementById("logs-panel");
+  var logsService = document.getElementById("logs-service");
+  var logsPause = document.getElementById("logs-pause");
+  var logsOutput = document.getElementById("logs-output");
+  var logsState = document.getElementById("logs-state");
+  var logsOpen = false;
+  var logsPaused = false;
+  var logsRequest = null;
+  function refreshServiceLogs() {
+    if (!logsOpen || logsPaused || logsRequest || isPageHidden()) { return; }
+    var selected = logsService.value;
+    var xhr = new XMLHttpRequest();
+    logsRequest = xhr;
+    xhr.open("GET", "/api/service/logs?service=" + encodeURIComponent(selected), true);
+    xhr.timeout = 10000;
+    xhr.setRequestHeader("X-Dashboard-Token", restartButton.getAttribute("data-token"));
+    function failed() {
+      logsRequest = null;
+      if (logsOpen && selected === logsService.value && !logsPaused) {
+        logsState.textContent = "Sem ligação. A tentar novamente…";
+      }
+    }
+    xhr.onload = function () {
+      var result;
+      logsRequest = null;
+      if (!logsOpen || selected !== logsService.value || logsPaused) { return; }
+      try { result = JSON.parse(xhr.responseText); } catch (e) { failed(); return; }
+      if (xhr.status !== 200 || !result.ok) {
+        logsState.textContent = result.error || "Não foi possível ler os registos.";
+        return;
+      }
+      var atBottom = logsOutput.scrollHeight - logsOutput.scrollTop - logsOutput.clientHeight < 40;
+      logsOutput.textContent = result.logs || "Sem registos disponíveis para este serviço.";
+      if (atBottom) { logsOutput.scrollTop = logsOutput.scrollHeight; }
+      logsState.textContent = result.state + " · " + new Date().toLocaleTimeString();
+    };
+    xhr.onerror = failed;
+    xhr.ontimeout = failed;
+    xhr.send(null);
+  }
+  if (logsToggle) {
+    logsToggle.addEventListener("click", function () {
+      logsOpen = !logsOpen;
+      logsPanel.hidden = !logsOpen;
+      logsToggle.setAttribute("aria-expanded", String(logsOpen));
+      refreshServiceLogs();
+    });
+    logsService.addEventListener("change", function () {
+      if (logsRequest) { logsRequest.abort(); logsRequest = null; }
+      logsOutput.textContent = "A carregar…";
+      logsState.textContent = "";
+      logsPaused = false;
+      logsPause.textContent = "Pausar";
+      refreshServiceLogs();
+    });
+    logsPause.addEventListener("click", function () {
+      logsPaused = !logsPaused;
+      logsPause.textContent = logsPaused ? "Retomar" : "Pausar";
+      if (logsPaused) { logsState.textContent = "Em pausa"; }
+      refreshServiceLogs();
+    });
+    window.setInterval(refreshServiceLogs, 4000);
+  }
   var deviceList = document.getElementById("device-list");
   var acList = document.getElementById("ac-list");
   var categoryTabs = document.querySelector(".category-tabs");
